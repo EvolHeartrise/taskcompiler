@@ -39,6 +39,7 @@
 		"wrangler": "^4.83.0"
 	},
 	"dependencies": {
+		"cron-parser": "^5.5.0",
 		"sucrase": "^3.35.1"
 	}
 }

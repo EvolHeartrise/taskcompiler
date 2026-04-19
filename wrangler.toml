@@ -31,3 +31,6 @@ class_name = "GenerateWorkflowFlow"
 name = "runely-heal"
 binding = "HEAL_WORKFLOW"
 class_name = "HealWorkflowFlow"
+
+[triggers]
+crons = ["* * * * *"]

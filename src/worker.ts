@@ -9,8 +9,26 @@
 // JS is what wrangler bundles at deploy time.
 
 import sveltekitWorker from '../.svelte-kit/cloudflare/_worker.js';
+import { withEnv } from '$lib/server/env';
+import { handleCronTick } from '$lib/server/triggers/cron-handler';
 
 export { GenerateWorkflowFlow } from '$lib/server/workflows/gen-flow';
 export { HealWorkflowFlow } from '$lib/server/workflows/heal-flow';
 
-export default sveltekitWorker;
+export default {
+	fetch: sveltekitWorker.fetch.bind(sveltekitWorker),
+	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+		ctx.waitUntil(
+			withEnv(env, async () => {
+				try {
+					const result = await handleCronTick(controller.scheduledTime);
+					console.log(
+						`[cron] tick scanned=${result.scanned} fired=${result.fired.length} skipped=${result.skipped.length}`
+					);
+				} catch (err) {
+					console.error('[cron] handleCronTick threw', err);
+				}
+			})
+		);
+	}
+} satisfies ExportedHandler<Env>;

@@ -13,6 +13,7 @@ export interface Workflow {
 	cronExpr: string | null;
 	createdAt: number;
 	updatedAt: number;
+	lastFiredAt: number;
 }
 
 export interface WorkflowVersion {
