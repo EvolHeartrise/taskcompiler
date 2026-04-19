@@ -1,4 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
+import type { Workflow } from '@cloudflare/workers-types';
 import type { Actions, PageServerLoad } from './$types';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import {
@@ -14,7 +15,33 @@ import {
 import { listHealSessionsForWorkflow } from '$lib/server/db/queries/heals';
 import { executeEvent, replayFailedEvents } from '$lib/server/engine';
 
-export const load: PageServerLoad = async ({ params, url }) => {
+export interface InFlightStatus {
+	status: string;
+	error?: { name: string; message: string };
+}
+
+export interface InFlightInfo {
+	gen?: InFlightStatus;
+	heal?: InFlightStatus;
+	healSessionId?: string;
+}
+
+async function fetchInstanceStatus(
+	binding: Workflow<unknown>,
+	instanceId: string
+): Promise<InFlightStatus | undefined> {
+	try {
+		const instance = await binding.get(instanceId);
+		const status = await instance.status();
+		const out: InFlightStatus = { status: status.status };
+		if (status.error) out.error = status.error;
+		return out;
+	} catch {
+		return undefined;
+	}
+}
+
+export const load: PageServerLoad = async ({ params, url, platform }) => {
 	const workflow = await getWorkflow(params.workflowId);
 	if (!workflow) error(404, 'Workflow not found');
 
@@ -35,6 +62,28 @@ export const load: PageServerLoad = async ({ params, url }) => {
 	const selectedVersion =
 		(selectedVersionId ? await getVersion(selectedVersionId) : null) ?? currentVersion;
 
+	const inFlight: InFlightInfo = {};
+	if (platform) {
+		const env = platform.env;
+
+		if (workflow.currentVersionId === null) {
+			const gen = await fetchInstanceStatus(env.GEN_WORKFLOW, `gen-${workflow.id}`);
+			if (gen) inFlight.gen = gen;
+		}
+
+		const latestHeal = heals[0];
+		if (latestHeal && latestHeal.status === 'running') {
+			const heal = await fetchInstanceStatus(
+				env.HEAL_WORKFLOW,
+				`heal-${latestHeal.triggeringRunId}`
+			);
+			if (heal) {
+				inFlight.heal = heal;
+				inFlight.healSessionId = latestHeal.id;
+			}
+		}
+	}
+
 	return {
 		workflow,
 		currentVersion,
@@ -50,6 +99,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
 			totalFailed: failedRuns.length,
 			totalHeals: heals.length
 		},
+		inFlight,
 		origin: url.origin
 	};
 };

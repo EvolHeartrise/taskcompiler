@@ -1,22 +1,26 @@
-import { transform } from "sucrase";
-import { getEnv } from "$lib/server/env";
+import { transform } from 'sucrase';
+import { getEnv } from '$lib/server/env';
 import {
 	COMPATIBILITY_DATE,
 	COMPATIBILITY_FLAGS,
 	DEFAULT_D1_DATABASE_ID,
-	DISPATCH_NAMESPACE,
-} from "./config";
+	DISPATCH_NAMESPACE
+} from './config';
 
-// Vite ?raw imports inline the source files into the control-plane bundle, so
-// no fs access is required at runtime (works inside the Cloudflare Worker).
-import bootstrapMainSource from "../../../../templates/workflow-worker/main.ts?raw";
-import bootstrapCtxSource from "../../../../templates/workflow-worker/ctx.ts?raw";
-import bootstrapErrorSource from "../../../../templates/workflow-worker/error.ts?raw";
+// The bootstrap source strings are pre-inlined into a generated TS module
+// (see scripts/generate-templates.ts). We avoid Vite's `?raw` suffix here so
+// wrangler's esbuild — which doesn't understand `?raw` — can also bundle this
+// file when it bundles `src/worker.ts` for deployment.
+import {
+	bootstrapMainSource,
+	bootstrapCtxSource,
+	bootstrapErrorSource
+} from './templates.generated';
 
 export type WfpBinding =
-	| { type: "d1"; name: string; database_id: string }
-	| { type: "plain_text"; name: string; text: string }
-	| { type: "secret_text"; name: string; text: string };
+	| { type: 'd1'; name: string; database_id: string }
+	| { type: 'plain_text'; name: string; text: string }
+	| { type: 'secret_text'; name: string; text: string };
 
 export interface UploadInput {
 	scriptName: string;
@@ -39,12 +43,12 @@ interface CloudflareApiError {
 	errors?: CloudflareErrorEntry[];
 }
 
-const MODULE_MIME = "application/javascript+module";
-const METADATA_MIME = "application/json";
+const MODULE_MIME = 'application/javascript+module';
+const METADATA_MIME = 'application/json';
 
 function transpile(source: string, label: string): string {
 	try {
-		return transform(source, { transforms: ["typescript"] }).code;
+		return transform(source, { transforms: ['typescript'] }).code;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		throw new Error(`Failed to transpile ${label}: ${message}`);
@@ -61,12 +65,10 @@ function requireEnv(): { accountId: string; token: string } {
 	const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 	const token = env.CLOUDFLARE_API_TOKEN;
 	const missing: string[] = [];
-	if (!accountId) missing.push("CLOUDFLARE_ACCOUNT_ID");
-	if (!token) missing.push("CLOUDFLARE_API_TOKEN");
+	if (!accountId) missing.push('CLOUDFLARE_ACCOUNT_ID');
+	if (!token) missing.push('CLOUDFLARE_API_TOKEN');
 	if (missing.length > 0) {
-		throw new Error(
-			`WFP upload misconfigured: missing ${missing.join(", ")} in env bindings.`,
-		);
+		throw new Error(`WFP upload misconfigured: missing ${missing.join(', ')} in env bindings.`);
 	}
 	return { accountId, token };
 }
@@ -78,49 +80,42 @@ function scriptUrl(accountId: string, scriptName: string): string {
 export async function uploadWorkflow(input: UploadInput): Promise<UploadResult> {
 	const { accountId, token } = requireEnv();
 
-	const userJs = transpile(input.userSourceTs, "user workflow");
-	const mainJs = transpile(bootstrapMainSource, "bootstrap main.ts");
-	const ctxJs = transpile(bootstrapCtxSource, "bootstrap ctx.ts");
-	const errorJs = transpile(bootstrapErrorSource, "bootstrap error.ts");
+	const userJs = transpile(input.userSourceTs, 'user workflow');
+	const mainJs = transpile(bootstrapMainSource, 'bootstrap main.ts');
+	const ctxJs = transpile(bootstrapCtxSource, 'bootstrap ctx.ts');
+	const errorJs = transpile(bootstrapErrorSource, 'bootstrap error.ts');
 
 	const bindings: WfpBinding[] = [
-		{ type: "d1", name: "DB", database_id: DEFAULT_D1_DATABASE_ID },
-		...(input.bindings ?? []),
+		{ type: 'd1', name: 'DB', database_id: DEFAULT_D1_DATABASE_ID },
+		...(input.bindings ?? [])
 	];
 
 	const metadata = {
-		main_module: "main.js",
+		main_module: 'main.js',
 		bindings,
 		compatibility_date: COMPATIBILITY_DATE,
-		compatibility_flags: [...COMPATIBILITY_FLAGS],
+		compatibility_flags: [...COMPATIBILITY_FLAGS]
 	};
 
 	const fd = new FormData();
-	fd.append(
-		"metadata",
-		new Blob([JSON.stringify(metadata)], { type: METADATA_MIME }),
-	);
-	fd.append("main.js", new Blob([mainJs], { type: MODULE_MIME }), "main.js");
-	fd.append("ctx.js", new Blob([ctxJs], { type: MODULE_MIME }), "ctx.js");
-	fd.append("error.js", new Blob([errorJs], { type: MODULE_MIME }), "error.js");
-	fd.append(
-		"workflow.js",
-		new Blob([userJs], { type: MODULE_MIME }),
-		"workflow.js",
-	);
+	fd.append('metadata', new Blob([JSON.stringify(metadata)], { type: METADATA_MIME }));
+	fd.append('main.js', new Blob([mainJs], { type: MODULE_MIME }), 'main.js');
+	fd.append('ctx.js', new Blob([ctxJs], { type: MODULE_MIME }), 'ctx.js');
+	fd.append('error.js', new Blob([errorJs], { type: MODULE_MIME }), 'error.js');
+	fd.append('workflow.js', new Blob([userJs], { type: MODULE_MIME }), 'workflow.js');
 
 	const res = await fetch(scriptUrl(accountId, input.scriptName), {
-		method: "PUT",
+		method: 'PUT',
 		headers: { Authorization: `Bearer ${token}` },
-		body: fd,
+		body: fd
 	});
 
 	if (!res.ok) {
-		const text = await res.text().catch(() => "");
+		const text = await res.text().catch(() => '');
 		throw new Error(
 			`WFP upload failed for ${input.scriptName}: ${res.status} ${res.statusText}${
-				text ? ` — ${truncate(text, 500)}` : ""
-			}`,
+				text ? ` — ${truncate(text, 500)}` : ''
+			}`
 		);
 	}
 
@@ -131,14 +126,14 @@ export async function deleteWorkflow(scriptName: string): Promise<void> {
 	const { accountId, token } = requireEnv();
 
 	const res = await fetch(scriptUrl(accountId, scriptName), {
-		method: "DELETE",
-		headers: { Authorization: `Bearer ${token}` },
+		method: 'DELETE',
+		headers: { Authorization: `Bearer ${token}` }
 	});
 
 	if (res.status === 404) return;
 	if (res.ok) return;
 
-	const text = await res.text().catch(() => "");
+	const text = await res.text().catch(() => '');
 	let parsed: CloudflareApiError | undefined;
 	if (text) {
 		try {
@@ -148,11 +143,11 @@ export async function deleteWorkflow(scriptName: string): Promise<void> {
 		}
 	}
 	const detail = parsed?.errors?.length
-		? parsed.errors.map((e) => `[${e.code}] ${e.message}`).join("; ")
+		? parsed.errors.map((e) => `[${e.code}] ${e.message}`).join('; ')
 		: truncate(text, 500);
 	throw new Error(
 		`WFP delete failed for ${scriptName}: ${res.status} ${res.statusText}${
-			detail ? ` — ${detail}` : ""
-		}`,
+			detail ? ` — ${detail}` : ''
+		}`
 	);
 }

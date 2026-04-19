@@ -1,11 +1,28 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import type { PageProps } from './$types';
 	import type { Event, HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
 
 	let { data, form }: PageProps = $props();
+
+	let genInFlight = $derived(
+		data.inFlight.gen?.status === 'running' || data.inFlight.gen?.status === 'queued'
+	);
+	let healInFlight = $derived(
+		data.inFlight.heal?.status === 'running' || data.inFlight.heal?.status === 'queued'
+	);
+	let anyInFlight = $derived(genInFlight || healInFlight);
+
+	$effect(() => {
+		if (!anyInFlight) return;
+		const id = setInterval(() => {
+			void invalidateAll();
+		}, 3000);
+		return () => clearInterval(id);
+	});
 
 	type TabId = 'overview' | 'events' | 'failures' | 'healings' | 'code';
 	const TABS: { id: TabId; label: string }[] = [
@@ -155,6 +172,25 @@
 </nav>
 
 {#if activeTab === 'overview'}
+	{#if genInFlight}
+		<div class="banner banner-info">
+			<strong>Generating workflow…</strong>
+			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
+		</div>
+	{:else if data.inFlight.gen?.status === 'errored'}
+		<div class="banner banner-error">
+			<strong>Generation failed</strong>
+			{#if data.inFlight.gen.error}
+				<span class="muted small">{data.inFlight.gen.error.name}: {data.inFlight.gen.error.message}</span>
+			{/if}
+		</div>
+	{/if}
+	{#if healInFlight}
+		<div class="banner banner-info">
+			<strong>Healing in progress…</strong>
+			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
+		</div>
+	{/if}
 	<section class="grid">
 		<div class="card stats">
 			<div class="stat"><div class="k">Events</div><div class="v">{data.stats.totalEvents}</div></div>
@@ -773,6 +809,24 @@
 		border-radius: 6px;
 		padding: 8px 10px;
 		margin-top: 10px;
+	}
+	.banner {
+		display: flex;
+		gap: 10px;
+		align-items: baseline;
+		border-radius: 6px;
+		padding: 10px 14px;
+		margin-bottom: 14px;
+	}
+	.banner-info {
+		background: #eff6ff;
+		border: 1px solid #bfdbfe;
+		color: #1e3a8a;
+	}
+	.banner-error {
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		color: #991b1b;
 	}
 	.result {
 		margin-top: 10px;
