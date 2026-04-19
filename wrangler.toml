@@ -17,3 +17,7 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "runely-dev"
 database_id = "2c63755f-ef22-4e89-97d0-2dd9c9fdb153"
+
+[[dispatch_namespaces]]
+binding = "DISPATCHER"
+namespace = "runely-workflows"

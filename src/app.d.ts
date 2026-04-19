@@ -1,6 +1,11 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
-import type { D1Database, CfProperties, ExecutionContext } from '@cloudflare/workers-types';
+import type {
+	D1Database,
+	CfProperties,
+	ExecutionContext,
+	DispatchNamespace
+} from '@cloudflare/workers-types';
 
 declare global {
 	namespace App {
@@ -17,6 +22,7 @@ declare global {
 
 	interface Env {
 		DB: D1Database;
+		DISPATCHER: DispatchNamespace;
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		CLOUDFLARE_GATEWAY_NAME: string;
