@@ -10,6 +10,7 @@ interface WorkflowRow {
 	cron_expr: string | null;
 	created_at: number;
 	updated_at: number;
+	last_fired_at: number;
 }
 
 function rowToWorkflow(row: WorkflowRow): Workflow {
@@ -21,7 +22,8 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
 		triggerType: row.trigger_type,
 		cronExpr: row.cron_expr,
 		createdAt: row.created_at,
-		updatedAt: row.updated_at
+		updatedAt: row.updated_at,
+		lastFiredAt: row.last_fired_at
 	};
 }
 
@@ -38,8 +40,8 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 	const ts = now();
 	await getDb()
 		.prepare(
-			`INSERT INTO workflows (id, name, prompt, current_version_id, trigger_type, cron_expr, created_at, updated_at)
-			 VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`
+			`INSERT INTO workflows (id, name, prompt, current_version_id, trigger_type, cron_expr, created_at, updated_at, last_fired_at)
+			 VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 0)`
 		)
 		.bind(id, input.name, input.prompt, input.triggerType, input.cronExpr ?? null, ts, ts)
 		.run();
@@ -102,4 +104,22 @@ export async function updateWorkflow(
 export async function deleteWorkflow(id: string): Promise<boolean> {
 	const res = await getDb().prepare(`DELETE FROM workflows WHERE id = ?`).bind(id).run();
 	return (res.meta.changes ?? 0) > 0;
+}
+
+export async function listCronWorkflows(): Promise<Workflow[]> {
+	const res = await getDb()
+		.prepare(
+			`SELECT * FROM workflows
+			 WHERE trigger_type IN ('cron','both') AND cron_expr IS NOT NULL
+			 ORDER BY last_fired_at ASC`
+		)
+		.all<WorkflowRow>();
+	return res.results.map(rowToWorkflow);
+}
+
+export async function markWorkflowFired(workflowId: string, ts: number): Promise<void> {
+	await getDb()
+		.prepare(`UPDATE workflows SET last_fired_at = ? WHERE id = ?`)
+		.bind(ts, workflowId)
+		.run();
 }
