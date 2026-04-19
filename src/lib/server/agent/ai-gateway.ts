@@ -66,12 +66,12 @@ export async function createMessage(
 	opts?: { signal?: AbortSignal }
 ): Promise<MessagesResponse> {
 	const env = getEnv();
-	const apiKey = env.ANTHROPIC_API_KEY;
+	const cfToken = env.CLOUDFLARE_API_TOKEN;
 	const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 	const gatewayName = env.CLOUDFLARE_GATEWAY_NAME;
 
 	const missing: string[] = [];
-	if (!apiKey) missing.push("ANTHROPIC_API_KEY");
+	if (!cfToken) missing.push("CLOUDFLARE_API_TOKEN");
 	if (!accountId) missing.push("CLOUDFLARE_ACCOUNT_ID");
 	if (!gatewayName) missing.push("CLOUDFLARE_GATEWAY_NAME");
 	if (missing.length > 0) {
@@ -85,7 +85,7 @@ export async function createMessage(
 	const res = await fetch(url, {
 		method: "POST",
 		headers: {
-			"x-api-key": apiKey,
+			"cf-aig-authorization": `Bearer ${cfToken}`,
 			"anthropic-version": "2023-06-01",
 			"content-type": "application/json"
 		},

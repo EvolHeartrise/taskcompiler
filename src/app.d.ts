@@ -17,7 +17,7 @@ declare global {
 
 	interface Env {
 		DB: D1Database;
-		ANTHROPIC_API_KEY: string;
+		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		CLOUDFLARE_GATEWAY_NAME: string;
 	}
