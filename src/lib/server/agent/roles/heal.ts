@@ -69,7 +69,7 @@ No imports from node_modules, no relative imports. \`event\` is \`unknown\` — 
 - read_source: current workflow TS
 - list_events / get_event: inspect historical events for this workflow
 - list_failed_runs / get_run: inspect recent failures
-- run_test_event: run a candidate source against a specific historical event (ephemeral; no persistence). Use it to validate your fix on both the failing event and at least 2 non-failing ones before emitting.
+- run_test_event: run a candidate source against a specific historical event in isolation (deploys and tears down a temp Worker per call). Each call costs a few seconds of upload latency, so don't burn budget testing trivial things — use it to validate your final candidate against the failing event and a couple of historical ones.
 - emit_fixed_workflow: terminal. Call exactly once with the full corrected module source.
 
 ## Principles
@@ -379,7 +379,7 @@ function makeRunTestEventTool(workflowId: string): Tool {
 	return {
 		name: "run_test_event",
 		description:
-			"Run a candidate TS source against a specific historical event ephemerally (no persistence). Returns { ok, error?, logs_tail } (last 20 log entries).",
+			"Run a candidate TS source against a specific historical event in isolation. Each call deploys a temporary Worker, invokes it, and tears it down — costs a few seconds of upload latency. Don't burn budget testing trivial things; use it to validate your final candidate against the failing event and a couple of historical ones. Returns { ok, error?, logs_tail } (last 20 log entries).",
 		inputSchema: {
 			type: "object",
 			properties: {

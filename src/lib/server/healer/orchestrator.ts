@@ -1,5 +1,4 @@
 import { setRunFailedHook, type RunFailedContext } from "$lib/server/engine/hooks";
-import { invalidateVersion } from "$lib/server/engine/loader";
 import { replayFailedEvents } from "$lib/server/engine/replay";
 import { runAgainstEventEphemeral } from "$lib/server/engine/test-runner";
 import { getWorkflow } from "$lib/server/db/queries/workflows";
@@ -180,10 +179,15 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 	}
 
 	// Orchestrator-side validation gate: run candidate against ALL historical events.
+	// Each iteration deploys + invokes + tears down a temp WFP script, so for workflows
+	// with many events the sweep can take many seconds. Bail early when the candidate
+	// is obviously broken to save orchestrator time.
+	const EARLY_OUT_FAIL_THRESHOLD = 5;
 	const historicalEvents = await listAllEventsForWorkflow(workflowId);
 	const details: HealTestResultDetail[] = [];
 	let passed = 0;
 	let failed = 0;
+	let abortedEarly = false;
 	for (const event of historicalEvents) {
 		const res = await runAgainstEventEphemeral(outcome.sourceTs, event, workflow);
 		const detail: HealTestResultDetail = { eventId: event.id, ok: res.ok };
@@ -191,6 +195,10 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 		details.push(detail);
 		if (res.ok) passed += 1;
 		else failed += 1;
+		if (failed >= EARLY_OUT_FAIL_THRESHOLD) {
+			abortedEarly = true;
+			break;
+		}
 	}
 
 	const sweep: HealTestResults = {
@@ -199,6 +207,25 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 		failed,
 		details,
 	};
+
+	if (abortedEarly) {
+		await finishHealSession(session.id, {
+			status: "failed",
+			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),
+			testResults: sweep,
+			diff: computeDiff(prevCurrent.sourceTs, outcome.sourceTs),
+			newVersionId: null,
+		});
+		console.log("healer: validation sweep aborted early after threshold failures", {
+			workflowId,
+			passed,
+			failed,
+			tested: details.length,
+			total: historicalEvents.length,
+			threshold: EARLY_OUT_FAIL_THRESHOLD,
+		});
+		return;
+	}
 
 	const oldSource = prevCurrent.sourceTs;
 	const diff = computeDiff(oldSource, outcome.sourceTs);
@@ -220,14 +247,28 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 		return;
 	}
 
-	// Green sweep — deploy a new version.
+	// Green sweep — upload the new version's user Worker, then record it as current.
+	const nextVersionNumber = prevCurrent.version + 1;
+	let deployPath: string;
 	try {
-		const nextVersionNumber = prevCurrent.version + 1;
-		const deployPath = await writeVersion(
+		deployPath = await writeVersion(workflowId, nextVersionNumber, outcome.sourceTs);
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		console.error("healer: WFP upload failed; not promoting candidate", {
 			workflowId,
-			nextVersionNumber,
-			outcome.sourceTs,
-		);
+			error: message,
+		});
+		await finishHealSession(session.id, {
+			status: "failed",
+			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),
+			testResults: sweep,
+			diff,
+			newVersionId: null,
+		});
+		return;
+	}
+
+	try {
 		const version = await createVersion({
 			workflowId,
 			sourceTs: outcome.sourceTs,
@@ -237,8 +278,6 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 			healedFromRunId: triggeringRunId,
 			setAsCurrent: true,
 		});
-
-		invalidateVersion(prevCurrent.id);
 
 		await finishHealSession(session.id, {
 			status: "success",
@@ -252,7 +291,14 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 			workflowId,
 			newVersionId: version.id,
 			versionNumber: nextVersionNumber,
+			deployPath,
 		});
+
+		// TODO(M3+): delete the previous version's WFP script via
+		// deleteWorkflowVersion(prevCurrent.deployPath) once we have a safe way to
+		// avoid racing in-flight invocations against the old script. For M2 we leave
+		// stale scripts in the dispatch namespace — they're cheap and cleanup is a
+		// future concern.
 
 		try {
 			const replay = await replayFailedEvents(workflowId);
@@ -270,7 +316,10 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 		}
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
-		console.error("healer: deploy threw", { workflowId, error: message });
+		console.error("healer: post-upload deploy step threw", {
+			workflowId,
+			error: message,
+		});
 		await finishHealSession(session.id, {
 			status: "failed",
 			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),

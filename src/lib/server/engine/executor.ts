@@ -6,10 +6,14 @@ import {
 } from "$lib/server/db/queries/runs";
 import { getCurrentVersion } from "$lib/server/db/queries/versions";
 import { getWorkflow } from "$lib/server/db/queries/workflows";
-import type { EventTriggerType, RunError, RunStatus } from "$lib/server/db/types";
-import { createContext } from "./context";
+import type {
+	EventTriggerType,
+	RunError,
+	RunLogEntry,
+	RunStatus,
+} from "$lib/server/db/types";
+import { getEnv } from "$lib/server/env";
 import { getRunFailedHook } from "./hooks";
-import { loadWorkflowRun } from "./loader";
 
 export interface ExecuteOptions {
 	workflowId: string;
@@ -29,6 +33,13 @@ export interface ExecuteResult {
 export interface ExecuteExistingOptions {
 	isReplay?: boolean;
 	parentRunId?: string;
+}
+
+interface InvokeResponseBody {
+	ok: boolean;
+	result?: unknown;
+	error?: RunError;
+	logs?: RunLogEntry[];
 }
 
 const chains = new Map<string, Promise<unknown>>();
@@ -118,41 +129,74 @@ export async function executeExistingEvent(
 			parentRunId: opts.parentRunId ?? null,
 		});
 
-		const { ctx, getLogs } = createContext(workflow, event);
+		let runError: RunError | null = null;
+		let runResult: unknown;
+		let runLogs: RunLogEntry[] = [];
 
 		try {
-			const fn = await loadWorkflowRun(version);
-			const result = await fn(event.payload, ctx);
-			await finishRunOk(run.id, result, getLogs());
+			const env = getEnv();
+			const response = await env.DISPATCHER.get(version.deployPath).fetch(
+				"https://workflow.invoke/",
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						workflow: { id: workflow.id, name: workflow.name },
+						event: {
+							id: event.id,
+							triggerType: event.triggerType,
+							receivedAt: event.receivedAt,
+							payload: event.payload,
+						},
+					}),
+				},
+			);
+
+			const body = (await response.json()) as InvokeResponseBody;
+			runLogs = body.logs ?? [];
+
+			if (body.ok) {
+				runResult = body.result;
+			} else {
+				runError = body.error ?? {
+					name: "Error",
+					message: "workflow reported failure with no error",
+				};
+			}
+		} catch (err) {
+			runError = toRunError(err);
+		}
+
+		if (runError === null) {
+			await finishRunOk(run.id, runResult, runLogs);
 			return {
 				eventId: event.id,
 				runId: run.id,
 				status: "ok" as const,
-				result,
-			};
-		} catch (err) {
-			const runError = toRunError(err);
-			await finishRunFailed(run.id, runError, getLogs());
-			try {
-				await getRunFailedHook()({
-					runId: run.id,
-					workflowId: workflow.id,
-					eventId: event.id,
-				});
-			} catch (hookErr) {
-				console.error("runFailedHook threw", {
-					runId: run.id,
-					workflowId: workflow.id,
-					eventId: event.id,
-					error: hookErr,
-				});
-			}
-			return {
-				eventId: event.id,
-				runId: run.id,
-				status: "failed" as const,
-				error: runError,
+				result: runResult,
 			};
 		}
+
+		await finishRunFailed(run.id, runError, runLogs);
+		try {
+			await getRunFailedHook()({
+				runId: run.id,
+				workflowId: workflow.id,
+				eventId: event.id,
+			});
+		} catch (hookErr) {
+			console.error("runFailedHook threw", {
+				runId: run.id,
+				workflowId: workflow.id,
+				eventId: event.id,
+				error: hookErr,
+			});
+		}
+		return {
+			eventId: event.id,
+			runId: run.id,
+			status: "failed" as const,
+			error: runError,
+		};
 	});
 }
