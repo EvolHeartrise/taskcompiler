@@ -1,0 +1,15 @@
+# This config exists ONLY for `@sveltejs/adapter-cloudflare`. The adapter
+# reads it during `vite build` to figure out where to write its generated
+# Worker (`main`) and what binding name to use for static assets. The real
+# wrangler config used by `wrangler dev` / `wrangler deploy` is
+# `wrangler.toml`, which points `main` at `src/worker.ts` — our wrapper that
+# adds the Workflow class exports alongside SvelteKit's fetch handler.
+
+name = "runely"
+main = ".svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2026-04-17"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"

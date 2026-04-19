@@ -4,8 +4,11 @@ import type {
 	D1Database,
 	CfProperties,
 	ExecutionContext,
-	DispatchNamespace
+	DispatchNamespace,
+	Workflow
 } from '@cloudflare/workers-types';
+import type { GenWorkflowParams } from '$lib/server/workflows/gen-flow';
+import type { HealWorkflowParams } from '$lib/server/workflows/heal-flow';
 
 declare global {
 	namespace App {
@@ -26,6 +29,8 @@ declare global {
 		CLOUDFLARE_API_TOKEN: string;
 		CLOUDFLARE_ACCOUNT_ID: string;
 		CLOUDFLARE_GATEWAY_NAME: string;
+		GEN_WORKFLOW: Workflow<GenWorkflowParams>;
+		HEAL_WORKFLOW: Workflow<HealWorkflowParams>;
 	}
 }
 

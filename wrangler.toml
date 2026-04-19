@@ -5,7 +5,7 @@
 #   Apply migrations locally with `bunx wrangler d1 migrations apply runely-dev --local`.
 
 name = "runely"
-main = ".svelte-kit/cloudflare/_worker.js"
+main = "src/worker.ts"
 compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]
 
@@ -21,3 +21,13 @@ database_id = "2c63755f-ef22-4e89-97d0-2dd9c9fdb153"
 [[dispatch_namespaces]]
 binding = "DISPATCHER"
 namespace = "runely-workflows"
+
+[[workflows]]
+name = "runely-generate"
+binding = "GEN_WORKFLOW"
+class_name = "GenerateWorkflowFlow"
+
+[[workflows]]
+name = "runely-heal"
+binding = "HEAL_WORKFLOW"
+class_name = "HealWorkflowFlow"

@@ -7,7 +7,14 @@ const config = {
 		runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true)
 	},
 	kit: {
-		adapter: adapter({ fallback: 'err' })
+		adapter: adapter({
+			// Use a separate wrangler config so the adapter writes its Worker
+			// to `.svelte-kit/cloudflare/_worker.js` while the real wrangler
+			// config (`wrangler.toml`) points `main` at `src/worker.ts` — our
+			// wrapper that adds Workflow class exports.
+			config: 'wrangler.adapter.toml',
+			fallback: 'err'
+		})
 	}
 };
 

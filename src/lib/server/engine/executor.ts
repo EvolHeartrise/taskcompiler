@@ -13,7 +13,6 @@ import type {
 	RunStatus,
 } from "$lib/server/db/types";
 import { getEnv } from "$lib/server/env";
-import { getRunFailedHook } from "./hooks";
 
 export interface ExecuteOptions {
 	workflowId: string;
@@ -179,18 +178,16 @@ export async function executeExistingEvent(
 
 		await finishRunFailed(run.id, runError, runLogs);
 		try {
-			await getRunFailedHook()({
-				runId: run.id,
-				workflowId: workflow.id,
-				eventId: event.id,
+			const env = getEnv();
+			await env.HEAL_WORKFLOW.create({
+				id: `heal-${run.id}`,
+				params: {
+					workflowId: workflow.id,
+					triggeringRunId: run.id,
+				},
 			});
-		} catch (hookErr) {
-			console.error("runFailedHook threw", {
-				runId: run.id,
-				workflowId: workflow.id,
-				eventId: event.id,
-				error: hookErr,
-			});
+		} catch (err) {
+			console.error("failed to start HEAL_WORKFLOW for runId=" + run.id, err);
 		}
 		return {
 			eventId: event.id,

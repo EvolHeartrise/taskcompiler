@@ -1,5 +1,5 @@
-import { getDb, now, uuid } from "../index.ts";
-import type { TriggerType, Workflow } from "../types.ts";
+import { getDb, now, uuid } from '../index.ts';
+import type { TriggerType, Workflow } from '../types.ts';
 
 interface WorkflowRow {
 	id: string;
@@ -21,11 +21,12 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
 		triggerType: row.trigger_type,
 		cronExpr: row.cron_expr,
 		createdAt: row.created_at,
-		updatedAt: row.updated_at,
+		updatedAt: row.updated_at
 	};
 }
 
 export interface CreateWorkflowInput {
+	id?: string;
 	name: string;
 	prompt: string;
 	triggerType: TriggerType;
@@ -33,12 +34,12 @@ export interface CreateWorkflowInput {
 }
 
 export async function createWorkflow(input: CreateWorkflowInput): Promise<Workflow> {
-	const id = uuid();
+	const id = input.id ?? uuid();
 	const ts = now();
 	await getDb()
 		.prepare(
 			`INSERT INTO workflows (id, name, prompt, current_version_id, trigger_type, cron_expr, created_at, updated_at)
-			 VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`
 		)
 		.bind(id, input.name, input.prompt, input.triggerType, input.cronExpr ?? null, ts, ts)
 		.run();
@@ -74,7 +75,7 @@ export interface UpdateWorkflowInput {
 
 export async function updateWorkflow(
 	id: string,
-	patch: UpdateWorkflowInput,
+	patch: UpdateWorkflowInput
 ): Promise<Workflow | null> {
 	const existing = await getWorkflow(id);
 	if (!existing) return null;
@@ -83,26 +84,17 @@ export async function updateWorkflow(
 		name: patch.name ?? existing.name,
 		cronExpr: patch.cronExpr === undefined ? existing.cronExpr : patch.cronExpr,
 		currentVersionId:
-			patch.currentVersionId === undefined
-				? existing.currentVersionId
-				: patch.currentVersionId,
+			patch.currentVersionId === undefined ? existing.currentVersionId : patch.currentVersionId,
 		triggerType: patch.triggerType ?? existing.triggerType,
-		updatedAt: now(),
+		updatedAt: now()
 	};
 	await getDb()
 		.prepare(
 			`UPDATE workflows
 			 SET name = ?, cron_expr = ?, current_version_id = ?, trigger_type = ?, updated_at = ?
-			 WHERE id = ?`,
+			 WHERE id = ?`
 		)
-		.bind(
-			next.name,
-			next.cronExpr,
-			next.currentVersionId,
-			next.triggerType,
-			next.updatedAt,
-			id,
-		)
+		.bind(next.name, next.cronExpr, next.currentVersionId, next.triggerType, next.updatedAt, id)
 		.run();
 	return next;
 }

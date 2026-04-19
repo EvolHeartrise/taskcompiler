@@ -1,11 +1,11 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions } from './$types';
-import { generateWorkflow } from '$lib/server/agent/roles';
+import { createWorkflow } from '$lib/server/db/queries/workflows';
 import type { TriggerType } from '$lib/server/db/types';
 
 export const actions: Actions = {
-	default: async ({ request }) => {
-		const data = await request.formData();
+	default: async (event) => {
+		const data = await event.request.formData();
 		const name = (data.get('name') ?? '').toString().trim();
 		const prompt = (data.get('prompt') ?? '').toString().trim();
 		const triggerRaw = (data.get('trigger') ?? '').toString().trim();
@@ -23,20 +23,44 @@ export const actions: Actions = {
 			return fail(400, { values, error: 'Cron expression is required for cron triggers.' });
 		}
 
-		let workflowId: string;
+		if (!event.platform) {
+			return fail(500, { values, error: 'Platform bindings unavailable.' });
+		}
+
+		const workflowId = crypto.randomUUID();
+
 		try {
-			const result = await generateWorkflow({
+			await createWorkflow({
+				id: workflowId,
 				name,
 				prompt,
 				triggerType: trigger,
 				cronExpr: cronExpr || null
 			});
-			workflowId = result.workflowId;
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
-			return fail(500, { values, error: `Generation failed: ${message}` });
+			return fail(500, { values, error: `Could not create workflow: ${message}` });
 		}
 
-		redirect(303, `/w/${workflowId}`);
+		try {
+			await event.platform.env.GEN_WORKFLOW.create({
+				id: `gen-${workflowId}`,
+				params: {
+					workflowId,
+					name,
+					prompt,
+					triggerType: trigger,
+					cronExpr: cronExpr || null
+				}
+			});
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return fail(500, {
+				values,
+				error: `Could not start generation workflow: ${message}`
+			});
+		}
+
+		redirect(303, `/w/${workflowId}?gen=pending`);
 	}
 };
