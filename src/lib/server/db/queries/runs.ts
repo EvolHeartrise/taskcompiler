@@ -1,4 +1,4 @@
-import { db, now, uuid } from "../index.ts";
+import { getDb, now, uuid } from "../index.ts";
 import type { Run, RunError, RunLogEntry, RunStatus } from "../types.ts";
 
 interface RunRow {
@@ -15,48 +15,6 @@ interface RunRow {
 	is_replay: number;
 	parent_run_id: string | null;
 }
-
-const insertStmt = db.prepare(
-	`INSERT INTO runs
-	 (id, event_id, workflow_id, version_id, started_at, finished_at, status, error_json, result_json, logs_json, is_replay, parent_run_id)
-	 VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, ?, ?)`,
-);
-
-const finishOkStmt = db.prepare(
-	`UPDATE runs SET status = 'ok', finished_at = ?, result_json = ?, logs_json = ? WHERE id = ?`,
-);
-
-const finishFailedStmt = db.prepare(
-	`UPDATE runs SET status = 'failed', finished_at = ?, error_json = ?, logs_json = ? WHERE id = ?`,
-);
-
-const supersedeStmt = db.prepare(
-	`UPDATE runs SET status = 'superseded', finished_at = ? WHERE id = ?`,
-);
-
-const getStmt = db.prepare(`SELECT * FROM runs WHERE id = ?`);
-
-const listForWorkflowStmt = db.prepare(
-	`SELECT * FROM runs WHERE workflow_id = ? ORDER BY started_at DESC`,
-);
-
-const listFailedForWorkflowStmt = db.prepare(
-	`SELECT * FROM runs WHERE workflow_id = ? AND status = 'failed' ORDER BY started_at DESC`,
-);
-
-const listFailedLatestByEventStmt = db.prepare(
-	`SELECT r.* FROM runs r
-	 JOIN (
-	   SELECT event_id, MAX(started_at) AS latest
-	   FROM runs
-	   WHERE workflow_id = ?
-	   GROUP BY event_id
-	 ) latest_per_event
-	   ON latest_per_event.event_id = r.event_id
-	   AND latest_per_event.latest = r.started_at
-	 WHERE r.workflow_id = ? AND r.status = 'failed'
-	 ORDER BY r.started_at DESC`,
-);
 
 function parseJson<T>(s: string | null): T | null {
 	if (s === null) return null;
@@ -88,71 +46,116 @@ export interface CreateRunInput {
 	parentRunId?: string | null;
 }
 
-export function createRun(input: CreateRunInput): Run {
+export async function createRun(input: CreateRunInput): Promise<Run> {
 	const id = uuid();
 	const startedAt = now();
-	insertStmt.run(
-		id,
-		input.eventId,
-		input.workflowId,
-		input.versionId,
-		startedAt,
-		input.isReplay ? 1 : 0,
-		input.parentRunId ?? null,
-	);
-	const row = getStmt.get(id) as RunRow;
+	await getDb()
+		.prepare(
+			`INSERT INTO runs
+			 (id, event_id, workflow_id, version_id, started_at, finished_at, status, error_json, result_json, logs_json, is_replay, parent_run_id)
+			 VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, ?, ?)`,
+		)
+		.bind(
+			id,
+			input.eventId,
+			input.workflowId,
+			input.versionId,
+			startedAt,
+			input.isReplay ? 1 : 0,
+			input.parentRunId ?? null,
+		)
+		.run();
+	const row = await getDb()
+		.prepare(`SELECT * FROM runs WHERE id = ?`)
+		.bind(id)
+		.first<RunRow>();
+	if (!row) throw new Error(`createRun: row missing after insert (id=${id})`);
 	return rowToRun(row);
 }
 
-export function finishRunOk(
+export async function finishRunOk(
 	runId: string,
 	result: unknown,
 	logs: RunLogEntry[] | null,
-): Run | null {
-	finishOkStmt.run(
-		now(),
-		JSON.stringify(result ?? null),
-		logs ? JSON.stringify(logs) : null,
-		runId,
-	);
+): Promise<Run | null> {
+	await getDb()
+		.prepare(
+			`UPDATE runs SET status = 'ok', finished_at = ?, result_json = ?, logs_json = ? WHERE id = ?`,
+		)
+		.bind(
+			now(),
+			JSON.stringify(result ?? null),
+			logs ? JSON.stringify(logs) : null,
+			runId,
+		)
+		.run();
 	return getRun(runId);
 }
 
-export function finishRunFailed(
+export async function finishRunFailed(
 	runId: string,
 	error: RunError,
 	logs: RunLogEntry[] | null,
-): Run | null {
-	finishFailedStmt.run(
-		now(),
-		JSON.stringify(error),
-		logs ? JSON.stringify(logs) : null,
-		runId,
-	);
+): Promise<Run | null> {
+	await getDb()
+		.prepare(
+			`UPDATE runs SET status = 'failed', finished_at = ?, error_json = ?, logs_json = ? WHERE id = ?`,
+		)
+		.bind(now(), JSON.stringify(error), logs ? JSON.stringify(logs) : null, runId)
+		.run();
 	return getRun(runId);
 }
 
-export function markRunSuperseded(runId: string): Run | null {
-	supersedeStmt.run(now(), runId);
+export async function markRunSuperseded(runId: string): Promise<Run | null> {
+	await getDb()
+		.prepare(`UPDATE runs SET status = 'superseded', finished_at = ? WHERE id = ?`)
+		.bind(now(), runId)
+		.run();
 	return getRun(runId);
 }
 
-export function getRun(id: string): Run | null {
-	const row = getStmt.get(id) as RunRow | null;
+export async function getRun(id: string): Promise<Run | null> {
+	const row = await getDb()
+		.prepare(`SELECT * FROM runs WHERE id = ?`)
+		.bind(id)
+		.first<RunRow>();
 	return row ? rowToRun(row) : null;
 }
 
-export function listRunsForWorkflow(workflowId: string): Run[] {
-	const rows = listForWorkflowStmt.all(workflowId) as RunRow[];
-	return rows.map(rowToRun);
+export async function listRunsForWorkflow(workflowId: string): Promise<Run[]> {
+	const res = await getDb()
+		.prepare(`SELECT * FROM runs WHERE workflow_id = ? ORDER BY started_at DESC`)
+		.bind(workflowId)
+		.all<RunRow>();
+	return res.results.map(rowToRun);
 }
 
-export function listFailedRunsForWorkflow(workflowId: string): Run[] {
-	const rows = listFailedForWorkflowStmt.all(workflowId) as RunRow[];
-	return rows.map(rowToRun);
+export async function listFailedRunsForWorkflow(workflowId: string): Promise<Run[]> {
+	const res = await getDb()
+		.prepare(
+			`SELECT * FROM runs WHERE workflow_id = ? AND status = 'failed' ORDER BY started_at DESC`,
+		)
+		.bind(workflowId)
+		.all<RunRow>();
+	return res.results.map(rowToRun);
 }
 
-export function listFailedRunsByEvent(workflowId: string): Run[] {
-	const rows = listFailedLatestByEventStmt.all(workflowId, workflowId) as RunRow[];
-	return rows.map(rowToRun);
+export async function listFailedRunsByEvent(workflowId: string): Promise<Run[]> {
+	const res = await getDb()
+		.prepare(
+			`SELECT r.* FROM runs r
+			 JOIN (
+			   SELECT event_id, MAX(started_at) AS latest
+			   FROM runs
+			   WHERE workflow_id = ?
+			   GROUP BY event_id
+			 ) latest_per_event
+			   ON latest_per_event.event_id = r.event_id
+			   AND latest_per_event.latest = r.started_at
+			 WHERE r.workflow_id = ? AND r.status = 'failed'
+			 ORDER BY r.started_at DESC`,
+		)
+		.bind(workflowId, workflowId)
+		.all<RunRow>();
+	return res.results.map(rowToRun);
 }

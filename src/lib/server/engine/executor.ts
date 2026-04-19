@@ -76,7 +76,7 @@ function safeStringify(v: unknown): string {
 }
 
 export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult> {
-	const workflow = getWorkflow(opts.workflowId);
+	const workflow = await getWorkflow(opts.workflowId);
 	if (!workflow) {
 		throw new Error(`Workflow not found: ${opts.workflowId}`);
 	}
@@ -84,7 +84,7 @@ export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult>
 		throw new Error(`Workflow has no current version: ${opts.workflowId}`);
 	}
 
-	const event = createEvent({
+	const event = await createEvent({
 		workflowId: workflow.id,
 		triggerType: opts.trigger,
 		payload: opts.payload,
@@ -98,19 +98,19 @@ export async function executeExistingEvent(
 	eventId: string,
 	opts: ExecuteExistingOptions = {},
 ): Promise<ExecuteResult> {
-	const event = getEvent(eventId);
+	const event = await getEvent(eventId);
 	if (!event) throw new Error(`Event not found: ${eventId}`);
 
-	const workflow = getWorkflow(event.workflowId);
+	const workflow = await getWorkflow(event.workflowId);
 	if (!workflow) throw new Error(`Workflow not found: ${event.workflowId}`);
 
-	const version = getCurrentVersion(workflow.id);
+	const version = await getCurrentVersion(workflow.id);
 	if (!version) {
 		throw new Error(`Workflow has no current version: ${workflow.id}`);
 	}
 
 	return withLock(workflow.id, async () => {
-		const run = createRun({
+		const run = await createRun({
 			eventId: event.id,
 			workflowId: workflow.id,
 			versionId: version.id,
@@ -123,7 +123,7 @@ export async function executeExistingEvent(
 		try {
 			const fn = await loadWorkflowRun(version);
 			const result = await fn(event.payload, ctx);
-			finishRunOk(run.id, result, getLogs());
+			await finishRunOk(run.id, result, getLogs());
 			return {
 				eventId: event.id,
 				runId: run.id,
@@ -132,7 +132,7 @@ export async function executeExistingEvent(
 			};
 		} catch (err) {
 			const runError = toRunError(err);
-			finishRunFailed(run.id, runError, getLogs());
+			await finishRunFailed(run.id, runError, getLogs());
 			try {
 				await getRunFailedHook()({
 					runId: run.id,

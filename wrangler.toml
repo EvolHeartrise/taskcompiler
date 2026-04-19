@@ -1,0 +1,21 @@
+# D1 setup:
+#   Remote: `bunx wrangler d1 create runely-dev` then paste the returned
+#   `database_id` below. Apply schema with `bunx wrangler d1 migrations apply runely-dev --remote`.
+#   Local:  wrangler auto-creates a local D1 under `.wrangler/state/` on first `wrangler dev`.
+#   Apply migrations locally with `bunx wrangler d1 migrations apply runely-dev --local`.
+
+name = "runely"
+main = ".svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2026-04-17"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "runely-dev"
+# database_id to be filled by the user when they run `wrangler d1 create runely-dev`
+# For local dev, preview_database_id is fine as an empty string (wrangler auto-creates local D1)
+preview_database_id = "local"

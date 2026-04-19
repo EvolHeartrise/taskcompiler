@@ -12,26 +12,28 @@ import {
 	listRunsForWorkflow
 } from '$lib/server/db/queries/runs';
 import { listHealSessionsForWorkflow } from '$lib/server/db/queries/heals';
-import { triggerManual } from '$lib/server/triggers/manual';
-import { replayFailedEvents } from '$lib/server/engine/replay';
+import { executeEvent, replayFailedEvents } from '$lib/server/engine';
 
 export const load: PageServerLoad = async ({ params, url }) => {
-	const workflow = getWorkflow(params.workflowId);
+	const workflow = await getWorkflow(params.workflowId);
 	if (!workflow) error(404, 'Workflow not found');
 
-	const currentVersion = getCurrentVersion(workflow.id);
-	const versions = listVersions(workflow.id);
-	const events = listEventsForWorkflow(workflow.id, { limit: 50 });
-	const runs = listRunsForWorkflow(workflow.id).slice(0, 50);
-	const failedRuns = listFailedRunsForWorkflow(workflow.id);
-	const heals = listHealSessionsForWorkflow(workflow.id);
+	const [currentVersion, versions, events, allRuns, failedRuns, heals] = await Promise.all([
+		getCurrentVersion(workflow.id),
+		listVersions(workflow.id),
+		listEventsForWorkflow(workflow.id, { limit: 50 }),
+		listRunsForWorkflow(workflow.id),
+		listFailedRunsForWorkflow(workflow.id),
+		listHealSessionsForWorkflow(workflow.id)
+	]);
+	const runs = allRuns.slice(0, 50);
 
-	const totalRuns = listRunsForWorkflow(workflow.id).length;
-	const totalEvents = listEventsForWorkflow(workflow.id, { limit: 10000 }).length;
+	const totalRuns = allRuns.length;
+	const totalEvents = (await listEventsForWorkflow(workflow.id, { limit: 10000 })).length;
 
 	const selectedVersionId = url.searchParams.get('version');
 	const selectedVersion =
-		(selectedVersionId && getVersion(selectedVersionId)) || currentVersion;
+		(selectedVersionId ? await getVersion(selectedVersionId) : null) ?? currentVersion;
 
 	return {
 		workflow,
@@ -66,7 +68,11 @@ export const actions: Actions = {
 		}
 
 		try {
-			const result = await triggerManual(params.workflowId, payload);
+			const result = await executeEvent({
+				workflowId: params.workflowId,
+				trigger: 'manual',
+				payload
+			});
 			return {
 				trigger: {
 					ok: true,

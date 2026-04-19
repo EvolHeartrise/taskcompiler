@@ -46,7 +46,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	const workflowId = params.workflowId;
 	if (!workflowId) return errorJson(400, "missing workflowId");
 
-	const wf = getWorkflow(workflowId);
+	const wf = await getWorkflow(workflowId);
 	if (!wf) return errorJson(404, "workflow not found");
 
 	const parsed = await parseBody(request);
@@ -72,7 +72,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	const workflowId = params.workflowId;
 	if (!workflowId) return errorJson(400, "missing workflowId");
 
-	const wf = getWorkflow(workflowId);
+	const wf = await getWorkflow(workflowId);
 	if (!wf) return errorJson(404, "workflow not found");
 
 	const payload: Record<string, string> = {};

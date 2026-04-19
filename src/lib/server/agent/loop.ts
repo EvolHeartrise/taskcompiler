@@ -1,16 +1,18 @@
 import {
-	chatCompletion,
-	type OpenRouterMessage,
-	type OpenRouterToolCall
-} from "./openrouter.ts";
+	createMessage,
+	type AnthropicContentBlock,
+	type AnthropicMessage,
+	type AnthropicToolResultBlock
+} from "./ai-gateway.ts";
 import {
 	runToolCall,
-	toolToOpenRouterDefinition,
+	toolToAnthropicDefinition,
 	type Tool,
 	type ToolCtx
 } from "./tools.ts";
 
-export const DEFAULT_MODEL = "anthropic/claude-sonnet-4.6";
+export const DEFAULT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MAX_TOKENS = 4096;
 
 export type AgentEvent =
 	| { type: "assistant_message"; content: string }
@@ -38,19 +40,25 @@ export interface AgentRunResult {
 	turns: number;
 }
 
-function tryParseJson(s: string): unknown {
-	if (s.trim().length === 0) return {};
-	try {
-		return JSON.parse(s);
-	} catch {
-		return s;
+function defaultWorkingDir(): string {
+	if (typeof process !== "undefined" && typeof process.cwd === "function") {
+		return process.cwd();
 	}
+	return "/";
+}
+
+function extractText(content: AnthropicContentBlock[]): string {
+	const parts: string[] = [];
+	for (const block of content) {
+		if (block.type === "text") parts.push(block.text);
+	}
+	return parts.join("");
 }
 
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 	const model = opts.model ?? DEFAULT_MODEL;
 	const maxTurns = opts.maxTurns ?? 40;
-	const workingDir = opts.workingDir ?? process.cwd();
+	const workingDir = opts.workingDir ?? defaultWorkingDir();
 	const transcript: AgentEvent[] = [];
 
 	const emit = (e: AgentEvent) => {
@@ -61,9 +69,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 	const toolsByName = new Map<string, Tool>();
 	for (const t of opts.tools) toolsByName.set(t.name, t);
 	const toolDefs =
-		opts.tools.length > 0
-			? opts.tools.map(toolToOpenRouterDefinition)
-			: undefined;
+		opts.tools.length > 0 ? opts.tools.map(toolToAnthropicDefinition) : undefined;
 
 	const ctx: ToolCtx = {
 		workingDir,
@@ -73,8 +79,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 		}
 	};
 
-	const messages: OpenRouterMessage[] = [
-		{ role: "system", content: opts.systemPrompt },
+	const messages: AnthropicMessage[] = [
 		{ role: "user", content: opts.userMessage }
 	];
 
@@ -92,12 +97,16 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
 		let response;
 		try {
-			response = await chatCompletion({
-				model,
-				messages,
-				tools: toolDefs,
-				signal: opts.abortSignal
-			});
+			response = await createMessage(
+				{
+					model,
+					max_tokens: DEFAULT_MAX_TOKENS,
+					system: opts.systemPrompt,
+					messages,
+					tools: toolDefs
+				},
+				{ signal: opts.abortSignal }
+			);
 		} catch (err) {
 			if (opts.abortSignal?.aborted) {
 				stopReason = "aborted";
@@ -109,63 +118,58 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 			break;
 		}
 
-		const choice = response.choices[0];
-		if (!choice) {
-			emit({ type: "error", error: "OpenRouter returned no choices" });
-			stopReason = "tool_error";
-			break;
+		const assistantBlocks = response.content;
+		messages.push({ role: "assistant", content: assistantBlocks });
+
+		const assistantText = extractText(assistantBlocks);
+		if (assistantText.length > 0) {
+			emit({ type: "assistant_message", content: assistantText });
+			finalMessage = assistantText;
 		}
 
-		const assistantMsg = choice.message;
-		const content = assistantMsg.content ?? "";
-		const toolCalls: OpenRouterToolCall[] = assistantMsg.tool_calls ?? [];
+		const toolUses = assistantBlocks.filter(
+			(b): b is Extract<AnthropicContentBlock, { type: "tool_use" }> =>
+				b.type === "tool_use"
+		);
 
-		messages.push({
-			role: "assistant",
-			content: content.length > 0 ? content : null,
-			tool_calls: toolCalls.length > 0 ? toolCalls : undefined
-		});
-
-		if (content.length > 0) {
-			emit({ type: "assistant_message", content });
-			finalMessage = content;
-		}
-
-		if (toolCalls.length === 0) {
+		if (toolUses.length === 0) {
 			stopReason = "end_turn";
 			break;
 		}
 
-		for (const call of toolCalls) {
+		const toolResultBlocks: AnthropicToolResultBlock[] = [];
+		let aborted = false;
+
+		for (const call of toolUses) {
 			if (opts.abortSignal?.aborted) {
-				stopReason = "aborted";
+				aborted = true;
 				break;
 			}
-			const name = call.function.name;
-			const argsJson = call.function.arguments ?? "";
-			const parsedArgs = tryParseJson(argsJson);
-			emit({ type: "tool_call", id: call.id, name, args: parsedArgs });
+			const name = call.name;
+			const input = call.input;
+			emit({ type: "tool_call", id: call.id, name, args: input });
 
 			const tool = toolsByName.get(name);
 			if (!tool) {
 				const errText = `Unknown tool: ${name}`;
-				messages.push({
-					role: "tool",
-					tool_call_id: call.id,
-					name,
-					content: JSON.stringify({ ok: false, error: errText })
+				toolResultBlocks.push({
+					type: "tool_result",
+					tool_use_id: call.id,
+					content: errText,
+					is_error: true
 				});
 				emit({ type: "tool_result", id: call.id, ok: false, output: errText });
 				continue;
 			}
 
+			const argsJson = JSON.stringify(input ?? {});
 			const result = await runToolCall(tool, argsJson, ctx);
 			if (result.ok) {
-				messages.push({
-					role: "tool",
-					tool_call_id: call.id,
-					name,
-					content: result.output.length > 0 ? result.output : "(no output)"
+				const output = result.output.length > 0 ? result.output : "(no output)";
+				toolResultBlocks.push({
+					type: "tool_result",
+					tool_use_id: call.id,
+					content: output
 				});
 				emit({
 					type: "tool_result",
@@ -174,11 +178,11 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 					output: result.output
 				});
 			} else {
-				messages.push({
-					role: "tool",
-					tool_call_id: call.id,
-					name,
-					content: JSON.stringify({ ok: false, error: result.error })
+				toolResultBlocks.push({
+					type: "tool_result",
+					tool_use_id: call.id,
+					content: result.error,
+					is_error: true
 				});
 				emit({
 					type: "tool_result",
@@ -189,7 +193,11 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 			}
 		}
 
-		if (opts.abortSignal?.aborted) {
+		if (toolResultBlocks.length > 0) {
+			messages.push({ role: "user", content: toolResultBlocks });
+		}
+
+		if (aborted || opts.abortSignal?.aborted) {
 			stopReason = "aborted";
 			break;
 		}

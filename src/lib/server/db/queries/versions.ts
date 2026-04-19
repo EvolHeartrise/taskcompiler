@@ -1,4 +1,4 @@
-import { db, now, uuid } from "../index.ts";
+import { getDb, now, uuid } from "../index.ts";
 import type { VersionCreatedBy, WorkflowVersion } from "../types.ts";
 
 interface WorkflowVersionRow {
@@ -12,32 +12,6 @@ interface WorkflowVersionRow {
 	parent_version_id: string | null;
 	healed_from_run_id: string | null;
 }
-
-const insertStmt = db.prepare(
-	`INSERT INTO workflow_versions
-	 (id, workflow_id, version, source_ts, deploy_path, created_at, created_by, parent_version_id, healed_from_run_id)
-	 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-);
-
-const getStmt = db.prepare(`SELECT * FROM workflow_versions WHERE id = ?`);
-
-const maxVersionStmt = db.prepare(
-	`SELECT COALESCE(MAX(version), 0) AS max_version FROM workflow_versions WHERE workflow_id = ?`,
-);
-
-const getCurrentStmt = db.prepare(
-	`SELECT v.* FROM workflow_versions v
-	 JOIN workflows w ON w.current_version_id = v.id
-	 WHERE w.id = ?`,
-);
-
-const listStmt = db.prepare(
-	`SELECT * FROM workflow_versions WHERE workflow_id = ? ORDER BY version ASC`,
-);
-
-const updateWorkflowCurrentStmt = db.prepare(
-	`UPDATE workflows SET current_version_id = ?, updated_at = ? WHERE id = ?`,
-);
 
 function rowToVersion(row: WorkflowVersionRow): WorkflowVersion {
 	return {
@@ -63,14 +37,26 @@ export interface CreateVersionInput {
 	setAsCurrent?: boolean;
 }
 
-export function createVersion(input: CreateVersionInput): WorkflowVersion {
+export async function createVersion(input: CreateVersionInput): Promise<WorkflowVersion> {
 	const id = uuid();
 	const ts = now();
+	const db = getDb();
 
-	const insert = (): WorkflowVersion => {
-		const row = maxVersionStmt.get(input.workflowId) as { max_version: number };
-		const version = row.max_version + 1;
-		insertStmt.run(
+	const maxRow = await db
+		.prepare(
+			`SELECT COALESCE(MAX(version), 0) AS max_version FROM workflow_versions WHERE workflow_id = ?`,
+		)
+		.bind(input.workflowId)
+		.first<{ max_version: number }>();
+	const version = (maxRow?.max_version ?? 0) + 1;
+
+	const insertStmt = db
+		.prepare(
+			`INSERT INTO workflow_versions
+			 (id, workflow_id, version, source_ts, deploy_path, created_at, created_by, parent_version_id, healed_from_run_id)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		)
+		.bind(
 			id,
 			input.workflowId,
 			version,
@@ -81,30 +67,50 @@ export function createVersion(input: CreateVersionInput): WorkflowVersion {
 			input.parentVersionId ?? null,
 			input.healedFromRunId ?? null,
 		);
-		if (input.setAsCurrent) {
-			updateWorkflowCurrentStmt.run(id, ts, input.workflowId);
-		}
-		const saved = getStmt.get(id) as WorkflowVersionRow;
-		return rowToVersion(saved);
-	};
 
 	if (input.setAsCurrent) {
-		return db.transaction(insert)();
+		const updateStmt = db
+			.prepare(`UPDATE workflows SET current_version_id = ?, updated_at = ? WHERE id = ?`)
+			.bind(id, ts, input.workflowId);
+		await db.batch([insertStmt, updateStmt]);
+	} else {
+		await insertStmt.run();
 	}
-	return insert();
+
+	const saved = await db
+		.prepare(`SELECT * FROM workflow_versions WHERE id = ?`)
+		.bind(id)
+		.first<WorkflowVersionRow>();
+	if (!saved) throw new Error(`createVersion: row missing after insert (id=${id})`);
+	return rowToVersion(saved);
 }
 
-export function getVersion(id: string): WorkflowVersion | null {
-	const row = getStmt.get(id) as WorkflowVersionRow | null;
+export async function getVersion(id: string): Promise<WorkflowVersion | null> {
+	const row = await getDb()
+		.prepare(`SELECT * FROM workflow_versions WHERE id = ?`)
+		.bind(id)
+		.first<WorkflowVersionRow>();
 	return row ? rowToVersion(row) : null;
 }
 
-export function getCurrentVersion(workflowId: string): WorkflowVersion | null {
-	const row = getCurrentStmt.get(workflowId) as WorkflowVersionRow | null;
+export async function getCurrentVersion(
+	workflowId: string,
+): Promise<WorkflowVersion | null> {
+	const row = await getDb()
+		.prepare(
+			`SELECT v.* FROM workflow_versions v
+			 JOIN workflows w ON w.current_version_id = v.id
+			 WHERE w.id = ?`,
+		)
+		.bind(workflowId)
+		.first<WorkflowVersionRow>();
 	return row ? rowToVersion(row) : null;
 }
 
-export function listVersions(workflowId: string): WorkflowVersion[] {
-	const rows = listStmt.all(workflowId) as WorkflowVersionRow[];
-	return rows.map(rowToVersion);
+export async function listVersions(workflowId: string): Promise<WorkflowVersion[]> {
+	const res = await getDb()
+		.prepare(`SELECT * FROM workflow_versions WHERE workflow_id = ? ORDER BY version ASC`)
+		.bind(workflowId)
+		.all<WorkflowVersionRow>();
+	return res.results.map(rowToVersion);
 }

@@ -128,11 +128,11 @@ export function createContext(
 		log,
 		state: {
 			get: async <T = unknown>(key: string): Promise<T | undefined> => {
-				const value = getState(workflow.id, key);
+				const value = await getState(workflow.id, key);
 				return value === undefined ? undefined : (value as T);
 			},
 			set: async (key: string, value: unknown): Promise<void> => {
-				setState(workflow.id, key, value);
+				await setState(workflow.id, key, value);
 			},
 		},
 		secret: (name: string): string => {

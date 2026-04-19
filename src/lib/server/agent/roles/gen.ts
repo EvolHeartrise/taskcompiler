@@ -228,7 +228,9 @@ export async function generateWorkflow(
 
 	const sourceTs = emitState.emitted.sourceTs;
 
-	const workflow = createWorkflow({
+	// M4 restores cron firing via Cloudflare Cron Triggers. For now, cron/both
+	// workflows are created and stored but cron events are not fired.
+	const workflow = await createWorkflow({
 		name: opts.name,
 		prompt: opts.prompt,
 		triggerType: opts.triggerType,
@@ -237,7 +239,7 @@ export async function generateWorkflow(
 
 	const deployPath = await writeVersion(workflow.id, 1, sourceTs);
 
-	const version = createVersion({
+	const version = await createVersion({
 		workflowId: workflow.id,
 		sourceTs,
 		deployPath,
