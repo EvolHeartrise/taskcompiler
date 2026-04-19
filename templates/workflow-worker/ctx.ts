@@ -1,5 +1,38 @@
-import { getState, setState } from "$lib/server/db/queries/state";
-import type { Event, RunLogEntry, Workflow } from "$lib/server/db/types";
+interface D1Result {
+	value_json: string;
+}
+
+interface D1PreparedStatement {
+	bind: (...values: unknown[]) => D1PreparedStatement;
+	first: <T = unknown>() => Promise<T | null>;
+	run: () => Promise<unknown>;
+}
+
+interface D1Database {
+	prepare: (query: string) => D1PreparedStatement;
+}
+
+export interface WorkflowEnv {
+	DB: D1Database;
+	[key: string]: unknown;
+}
+
+interface InvokePayload {
+	workflow: { id: string; name: string };
+	event: {
+		id: string;
+		triggerType: "webhook" | "cron" | "manual" | "replay";
+		receivedAt: number;
+		payload: unknown;
+	};
+}
+
+interface LogEntry {
+	level: "debug" | "info" | "warn" | "error";
+	message: string;
+	ts: number;
+	data?: unknown;
+}
 
 export interface Ctx {
 	workflow: { id: string; name: string };
@@ -26,7 +59,10 @@ function isBodyLike(value: unknown): boolean {
 	if (value instanceof ArrayBuffer) return true;
 	if (ArrayBuffer.isView(value)) return true;
 	if (typeof FormData !== "undefined" && value instanceof FormData) return true;
-	if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams)
+	if (
+		typeof URLSearchParams !== "undefined" &&
+		value instanceof URLSearchParams
+	)
 		return true;
 	if (typeof Blob !== "undefined" && value instanceof Blob) return true;
 	if (typeof ReadableStream !== "undefined" && value instanceof ReadableStream)
@@ -42,17 +78,20 @@ function headerHas(init: RequestInit | undefined, name: string): boolean {
 	if (Array.isArray(h)) {
 		return h.some(([k]) => k.toLowerCase() === needle);
 	}
-	return Object.keys(h).some((k) => k.toLowerCase() === needle);
+	return Object.keys(h as Record<string, string>).some(
+		(k) => k.toLowerCase() === needle,
+	);
 }
 
-export function createContext(
-	workflow: Workflow,
-	event: Event,
-): { ctx: Ctx; getLogs: () => RunLogEntry[] } {
-	const logs: RunLogEntry[] = [];
+export function buildCtx(
+	env: WorkflowEnv,
+	body: InvokePayload,
+	logs: LogEntry[],
+): Ctx {
+	const workflowId = body.workflow.id;
 
 	const log: Ctx["log"] = (level, message, data) => {
-		const entry: RunLogEntry = { level, message, ts: Date.now() };
+		const entry: LogEntry = { level, message, ts: Date.now() };
 		if (data !== undefined) entry.data = data;
 		logs.push(entry);
 	};
@@ -113,12 +152,32 @@ export function createContext(
 		});
 	};
 
-	const ctx: Ctx = {
-		workflow: { id: workflow.id, name: workflow.name },
+	const stateGet = async <T = unknown>(key: string): Promise<T | undefined> => {
+		const row = await env.DB.prepare(
+			`SELECT value_json FROM workflow_state WHERE workflow_id = ? AND key = ?`,
+		)
+			.bind(workflowId, key)
+			.first<D1Result>();
+		if (!row) return undefined;
+		return JSON.parse(row.value_json) as T;
+	};
+
+	const stateSet = async (key: string, value: unknown): Promise<void> => {
+		await env.DB.prepare(
+			`INSERT INTO workflow_state (workflow_id, key, value_json, updated_at)
+			 VALUES (?, ?, ?, ?)
+			 ON CONFLICT(workflow_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,
+		)
+			.bind(workflowId, key, JSON.stringify(value ?? null), Date.now())
+			.run();
+	};
+
+	return {
+		workflow: { id: body.workflow.id, name: body.workflow.name },
 		event: {
-			id: event.id,
-			triggerType: event.triggerType,
-			receivedAt: event.receivedAt,
+			id: body.event.id,
+			triggerType: body.event.triggerType,
+			receivedAt: body.event.receivedAt,
 		},
 		http: {
 			fetch: instrumentedFetch,
@@ -127,22 +186,15 @@ export function createContext(
 		},
 		log,
 		state: {
-			get: async <T = unknown>(key: string): Promise<T | undefined> => {
-				const value = await getState(workflow.id, key);
-				return value === undefined ? undefined : (value as T);
-			},
-			set: async (key: string, value: unknown): Promise<void> => {
-				await setState(workflow.id, key, value);
-			},
+			get: stateGet,
+			set: stateSet,
 		},
 		secret: (name: string): string => {
-			const v = process.env[name];
-			if (v === undefined || v === "") {
+			const v = env[name];
+			if (typeof v !== "string" || v === "") {
 				throw new Error(`Secret not set: ${name}`);
 			}
 			return v;
 		},
 	};
-
-	return { ctx, getLogs: () => logs };
 }
