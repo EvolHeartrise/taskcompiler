@@ -16,6 +16,4 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "runely-dev"
-# database_id to be filled by the user when they run `wrangler d1 create runely-dev`
-# For local dev, preview_database_id is fine as an empty string (wrangler auto-creates local D1)
-preview_database_id = "local"
+database_id = "2c63755f-ef22-4e89-97d0-2dd9c9fdb153"
