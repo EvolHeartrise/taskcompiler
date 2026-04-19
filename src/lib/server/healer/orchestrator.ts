@@ -10,7 +10,7 @@ import {
 	finishHealSession,
 	getActiveHealSession,
 } from "$lib/server/db/queries/heals";
-import { readVersionSource, writeVersion } from "$lib/server/workflows-store";
+import { writeVersion } from "$lib/server/workflows-store";
 import { healWorkflow, type HealOutcome } from "$lib/server/agent/roles/heal";
 import type { AgentEvent } from "$lib/server/agent";
 import type {
@@ -116,7 +116,7 @@ function outcomeTestResultsToDb(outcome: HealOutcome): HealTestResults {
 export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 	const { workflowId, runId: triggeringRunId } = evt;
 
-	const existing = getActiveHealSession(workflowId);
+	const existing = await getActiveHealSession(workflowId);
 	if (existing) {
 		console.log("healer: skipping, active heal session exists", {
 			workflowId,
@@ -125,19 +125,19 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 		return;
 	}
 
-	const workflow = getWorkflow(workflowId);
+	const workflow = await getWorkflow(workflowId);
 	if (!workflow) {
 		console.error("healer: workflow not found", { workflowId });
 		return;
 	}
 
-	const prevCurrent = getCurrentVersion(workflowId);
+	const prevCurrent = await getCurrentVersion(workflowId);
 	if (!prevCurrent) {
 		console.error("healer: workflow has no current version", { workflowId });
 		return;
 	}
 
-	const session = createHealSession({ workflowId, triggeringRunId });
+	const session = await createHealSession({ workflowId, triggeringRunId });
 
 	const agentEvents: AgentEvent[] = [];
 
@@ -153,7 +153,7 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		console.error("healer: healWorkflow threw", { workflowId, error: message });
-		finishHealSession(session.id, {
+		await finishHealSession(session.id, {
 			status: "failed",
 			agentTranscript: agentEventsToTranscript(agentEvents),
 			testResults: { total: 0, passed: 0, failed: 0, details: [] },
@@ -164,7 +164,7 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 	}
 
 	if (outcome.status !== "success" || !outcome.sourceTs) {
-		finishHealSession(session.id, {
+		await finishHealSession(session.id, {
 			status: outcome.status === "success" ? "failed" : outcome.status,
 			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),
 			testResults: outcomeTestResultsToDb(outcome),
@@ -180,7 +180,7 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 	}
 
 	// Orchestrator-side validation gate: run candidate against ALL historical events.
-	const historicalEvents = listAllEventsForWorkflow(workflowId);
+	const historicalEvents = await listAllEventsForWorkflow(workflowId);
 	const details: HealTestResultDetail[] = [];
 	let passed = 0;
 	let failed = 0;
@@ -200,19 +200,11 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 		details,
 	};
 
-	let oldSource = "";
-	try {
-		oldSource = await readVersionSource(prevCurrent.deployPath);
-	} catch (err) {
-		console.error("healer: failed to read previous source for diff", {
-			workflowId,
-			error: err instanceof Error ? err.message : String(err),
-		});
-	}
+	const oldSource = prevCurrent.sourceTs;
 	const diff = computeDiff(oldSource, outcome.sourceTs);
 
 	if (failed > 0) {
-		finishHealSession(session.id, {
+		await finishHealSession(session.id, {
 			status: "failed",
 			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),
 			testResults: sweep,
@@ -236,7 +228,7 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 			nextVersionNumber,
 			outcome.sourceTs,
 		);
-		const version = createVersion({
+		const version = await createVersion({
 			workflowId,
 			sourceTs: outcome.sourceTs,
 			deployPath,
@@ -248,7 +240,7 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 
 		invalidateVersion(prevCurrent.id);
 
-		finishHealSession(session.id, {
+		await finishHealSession(session.id, {
 			status: "success",
 			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),
 			testResults: sweep,
@@ -279,7 +271,7 @@ export async function handleRunFailure(evt: RunFailedContext): Promise<void> {
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		console.error("healer: deploy threw", { workflowId, error: message });
-		finishHealSession(session.id, {
+		await finishHealSession(session.id, {
 			status: "failed",
 			agentTranscript: agentEventsToTranscript(outcome.agentTranscript),
 			testResults: sweep,

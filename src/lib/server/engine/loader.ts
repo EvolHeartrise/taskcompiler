@@ -1,4 +1,4 @@
-import { readVersionSource } from "$lib/server/workflows-store";
+import { transform } from "sucrase";
 import type { WorkflowVersion } from "$lib/server/db/types";
 import type { Ctx } from "./context";
 
@@ -15,25 +15,17 @@ function isWorkflowRun(value: unknown): value is WorkflowRun {
 }
 
 async function loadFromVersion(version: WorkflowVersion): Promise<WorkflowRun> {
-	let source: string;
-	try {
-		source = await readVersionSource(version.deployPath);
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		throw new Error(
-			`Failed to read workflow source at ${version.deployPath}: ${message}`,
-		);
-	}
-
 	let js: string;
 	try {
-		js = new Bun.Transpiler({ loader: "ts" }).transformSync(source);
+		const { code } = transform(version.sourceTs, { transforms: ["typescript"] });
+		js = code;
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
 		throw new Error(`Failed to transpile workflow v${version.version}: ${message}`);
 	}
 
-	const dataUrl = `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
+	const b64 = Buffer.from(js, "utf-8").toString("base64");
+	const dataUrl = `data:text/javascript;base64,${b64}`;
 
 	let mod: WorkflowModule;
 	try {

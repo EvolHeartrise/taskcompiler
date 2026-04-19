@@ -1,3 +1,5 @@
+-- Initial Runely schema (migrated from src/lib/server/db/schema.sql)
+
 CREATE TABLE IF NOT EXISTS workflows (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

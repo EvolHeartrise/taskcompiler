@@ -1,4 +1,4 @@
-import type { OpenRouterTool } from "./openrouter.ts";
+import type { AnthropicTool } from "./ai-gateway.ts";
 
 export interface ToolCtx {
 	workingDir: string;
@@ -13,14 +13,11 @@ export interface Tool<Input = unknown, Output = unknown> {
 	run(input: Input, ctx: ToolCtx): Promise<Output>;
 }
 
-export function toolToOpenRouterDefinition(tool: Tool): OpenRouterTool {
+export function toolToAnthropicDefinition(tool: Tool): AnthropicTool {
 	return {
-		type: "function",
-		function: {
-			name: tool.name,
-			description: tool.description,
-			parameters: tool.inputSchema
-		}
+		name: tool.name,
+		description: tool.description,
+		input_schema: tool.inputSchema
 	};
 }
 

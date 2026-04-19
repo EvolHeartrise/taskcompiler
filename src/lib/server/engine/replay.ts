@@ -13,7 +13,7 @@ export interface ReplayResult {
 }
 
 export async function replayFailedEvents(workflowId: string): Promise<ReplayResult> {
-	const failed = listFailedRunsByEvent(workflowId);
+	const failed = await listFailedRunsByEvent(workflowId);
 	const result: ReplayResult = {
 		workflowId,
 		attempted: 0,
@@ -23,7 +23,7 @@ export async function replayFailedEvents(workflowId: string): Promise<ReplayResu
 	};
 
 	for (const old of failed) {
-		markRunSuperseded(old.id);
+		await markRunSuperseded(old.id);
 		result.attempted += 1;
 		const res = await executeExistingEvent(old.eventId, {
 			isReplay: true,

@@ -6,11 +6,13 @@ export type {
 	StopReason
 } from "./loop.ts";
 export type { Tool, ToolCtx, ToolRunResult } from "./tools.ts";
-export { toolToOpenRouterDefinition, runToolCall } from "./tools.ts";
+export { toolToAnthropicDefinition, runToolCall } from "./tools.ts";
 export { defaultTools } from "./tools/default.ts";
+export { createMessage } from "./ai-gateway.ts";
 export type {
-	OpenRouterMessage,
-	OpenRouterTool,
-	OpenRouterToolCall,
-	ChatCompletionResponse
-} from "./openrouter.ts";
+	AnthropicMessage,
+	AnthropicContentBlock,
+	AnthropicTool,
+	MessagesRequest,
+	MessagesResponse
+} from "./ai-gateway.ts";

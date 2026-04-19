@@ -15,7 +15,6 @@ import {
 	getRun,
 	listFailedRunsForWorkflow,
 } from "$lib/server/db/queries/runs";
-import { readVersionSource } from "$lib/server/workflows-store";
 import { runAgainstEventEphemeral } from "$lib/server/engine/test-runner";
 import type { Event, RunError, RunLogEntry } from "$lib/server/db/types";
 
@@ -253,7 +252,7 @@ function makeListEventsTool(workflowId: string): Tool {
 				unknown
 			>;
 			const limit = getNumberProp(obj, "limit") ?? 20;
-			const all = listAllEventsForWorkflow(workflowId);
+			const all = await listAllEventsForWorkflow(workflowId);
 			const slice = all.slice(-Math.max(1, Math.floor(limit)));
 			const out = slice.map((e) => ({
 				id: e.id,
@@ -286,7 +285,7 @@ function makeGetEventTool(workflowId: string): Tool {
 			>;
 			const id = getStringProp(obj, "id");
 			if (!id) throw new Error("get_event: `id` is required");
-			const event = getEvent(id);
+			const event = await getEvent(id);
 			if (!event) throw new Error(`get_event: event not found: ${id}`);
 			if (event.workflowId !== workflowId) {
 				throw new Error(`get_event: event does not belong to this workflow`);
@@ -322,7 +321,7 @@ function makeListFailedRunsTool(workflowId: string): Tool {
 				unknown
 			>;
 			const limit = getNumberProp(obj, "limit") ?? 10;
-			const all = listFailedRunsForWorkflow(workflowId);
+			const all = await listFailedRunsForWorkflow(workflowId);
 			const slice = all.slice(0, Math.max(1, Math.floor(limit)));
 			const out = slice.map((r) => ({
 				runId: r.id,
@@ -355,7 +354,7 @@ function makeGetRunTool(workflowId: string): Tool {
 			>;
 			const runId = getStringProp(obj, "runId");
 			if (!runId) throw new Error("get_run: `runId` is required");
-			const run = getRun(runId);
+			const run = await getRun(runId);
 			if (!run) throw new Error(`get_run: run not found: ${runId}`);
 			if (run.workflowId !== workflowId) {
 				throw new Error("get_run: run does not belong to this workflow");
@@ -402,12 +401,12 @@ function makeRunTestEventTool(workflowId: string): Tool {
 			const sourceTs = getStringProp(obj, "source_ts");
 			if (!eventId) throw new Error("run_test_event: `event_id` is required");
 			if (!sourceTs) throw new Error("run_test_event: `source_ts` is required");
-			const event = getEvent(eventId);
+			const event = await getEvent(eventId);
 			if (!event) throw new Error(`run_test_event: event not found: ${eventId}`);
 			if (event.workflowId !== workflowId) {
 				throw new Error("run_test_event: event does not belong to this workflow");
 			}
-			const workflow = getWorkflow(workflowId);
+			const workflow = await getWorkflow(workflowId);
 			if (!workflow) throw new Error(`run_test_event: workflow not found: ${workflowId}`);
 			const res = await runAgainstEventEphemeral(sourceTs, event, workflow);
 			const tail = res.logs.slice(-20);
@@ -479,7 +478,7 @@ function makeEmitFixedWorkflowTool(
 export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	const emptyTestResults = { total: 0, passed: 0, failed: 0, details: [] };
 
-	const workflow = getWorkflow(opts.workflowId);
+	const workflow = await getWorkflow(opts.workflowId);
 	if (!workflow) {
 		return {
 			status: "failed",
@@ -489,7 +488,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		};
 	}
 
-	const currentVersion = getCurrentVersion(opts.workflowId);
+	const currentVersion = await getCurrentVersion(opts.workflowId);
 	if (!currentVersion) {
 		return {
 			status: "failed",
@@ -499,22 +498,11 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		};
 	}
 
-	let currentSource: string;
-	try {
-		currentSource = await readVersionSource(currentVersion.deployPath);
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		return {
-			status: "failed",
-			testResults: emptyTestResults,
-			agentTranscript: [],
-			reason: `failed to read current source: ${message}`,
-		};
-	}
+	const currentSource = currentVersion.sourceTs;
 
-	const triggeringRun = getRun(opts.triggeringRunId);
-	const failedEvent = triggeringRun ? getEvent(triggeringRun.eventId) : null;
-	const historicalEventCount = listAllEventsForWorkflow(opts.workflowId).length;
+	const triggeringRun = await getRun(opts.triggeringRunId);
+	const failedEvent = triggeringRun ? await getEvent(triggeringRun.eventId) : null;
+	const historicalEventCount = (await listAllEventsForWorkflow(opts.workflowId)).length;
 
 	const userMessage = buildUserMessage({
 		workflowName: workflow.name,

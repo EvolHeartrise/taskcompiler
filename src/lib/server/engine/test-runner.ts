@@ -1,3 +1,4 @@
+import { transform } from "sucrase";
 import type { Event, RunError, RunLogEntry, Workflow } from "$lib/server/db/types";
 import type { Ctx } from "./context";
 
@@ -185,7 +186,8 @@ export async function runAgainstEventEphemeral(
 
 	let js: string;
 	try {
-		js = new Bun.Transpiler({ loader: "ts" }).transformSync(sourceTs);
+		const { code } = transform(sourceTs, { transforms: ["typescript"] });
+		js = code;
 	} catch (err) {
 		return {
 			ok: false,
@@ -195,7 +197,7 @@ export async function runAgainstEventEphemeral(
 		};
 	}
 
-	const dataUrl = `data:text/javascript;base64,${Buffer.from(js).toString("base64")}`;
+	const dataUrl = `data:text/javascript;base64,${Buffer.from(js, "utf-8").toString("base64")}`;
 
 	let mod: WorkflowModule;
 	try {
