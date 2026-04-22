@@ -7,6 +7,7 @@
 		"dev": "bun run scripts/generate-templates.ts && vite dev",
 		"build": "bun run scripts/generate-templates.ts && vite build && bun run scripts/generate-templates.ts",
 		"preview": "bun run scripts/generate-templates.ts && vite build && bun run scripts/generate-templates.ts && wrangler dev",
+		"deploy": "bun run scripts/generate-templates.ts && vite build && bun run scripts/generate-templates.ts && wrangler deploy",
 		"prepare": "playwright install && svelte-kit sync || echo ''",
 		"check": "bun run scripts/generate-templates.ts && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --incremental --tsgo --diagnostic-sources \"js,svelte\"",
 		"check:watch": "bun run scripts/generate-templates.ts && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --incremental --tsgo --watch",
