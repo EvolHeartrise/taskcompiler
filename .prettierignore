@@ -7,3 +7,11 @@ bun.lockb
 
 # Miscellaneous
 /static/
+
+# Generated / build / caches
+.svelte-kit/
+.wrangler/
+build/
+node_modules/
+worker-configuration.d.ts
+src/lib/server/wfp/templates.generated.ts

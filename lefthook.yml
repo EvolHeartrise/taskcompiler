@@ -1,0 +1,27 @@
+# https://lefthook.dev/configuration/
+# Set LEFTHOOK=0 to skip hooks for one command; --no-verify also bypasses.
+
+pre-commit:
+  parallel: true
+  commands:
+    oxfmt:
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}'
+      run: bunx oxfmt {staged_files}
+      stage_fixed: true
+    oxlint:
+      glob: '*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}'
+      run: bunx oxlint --fix {staged_files}
+      stage_fixed: true
+    prettier:
+      glob: '*.{svelte,json,md,css,html,yml,yaml}'
+      run: bunx prettier --write --cache {staged_files}
+      stage_fixed: true
+    eslint-svelte:
+      glob: '*.svelte'
+      run: bunx eslint --fix --cache --cache-location node_modules/.cache/eslint/ {staged_files}
+      stage_fixed: true
+
+pre-push:
+  commands:
+    svelte-check:
+      run: bun run check

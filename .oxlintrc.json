@@ -1,0 +1,27 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"categories": {
+		"correctness": "error",
+		"suspicious": "error",
+		"perf": "warn",
+		"style": "warn",
+		"pedantic": "warn",
+		"restriction": "off",
+		"nursery": "off"
+	},
+	"env": {
+		"browser": true,
+		"node": true,
+		"es2024": true
+	},
+	"ignorePatterns": [
+		".svelte-kit",
+		".wrangler",
+		"build",
+		"dist",
+		"node_modules",
+		"static",
+		"worker-configuration.d.ts",
+		"src/lib/server/wfp/templates.generated.ts"
+	]
+}
