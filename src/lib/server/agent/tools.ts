@@ -1,4 +1,4 @@
-import type { AnthropicTool } from "./ai-gateway.ts";
+import type { AgentTool } from "./ai-gateway.ts";
 
 export interface ToolCtx {
 	workingDir: string;
@@ -13,7 +13,7 @@ export interface Tool<Input = unknown, Output = unknown> {
 	run(input: Input, ctx: ToolCtx): Promise<Output>;
 }
 
-export function toolToAnthropicDefinition(tool: Tool): AnthropicTool {
+export function toolToAgentDefinition(tool: Tool): AgentTool {
 	return {
 		name: tool.name,
 		description: tool.description,
