@@ -7,6 +7,7 @@ import { listEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listHealSessionsForWorkflow } from '$lib/server/db/queries/heals';
 import { executeEvent, replayFailedEvents } from '$lib/server/engine';
+import { highlightTs } from '$lib/server/highlight';
 
 export interface InFlightStatus {
 	status: string;
@@ -56,6 +57,10 @@ export const load: PageServerLoad = async ({ params, url, platform, locals }) =>
 	const selectedVersion =
 		(selectedVersionId ? await getVersion(selectedVersionId) : null) ?? currentVersion;
 
+	const selectedVersionSourceHtml = selectedVersion
+		? await highlightTs(selectedVersion.sourceTs)
+		: null;
+
 	const inFlight: InFlightInfo = {};
 	if (platform) {
 		const env = platform.env;
@@ -82,6 +87,7 @@ export const load: PageServerLoad = async ({ params, url, platform, locals }) =>
 		workflow,
 		currentVersion,
 		selectedVersion,
+		selectedVersionSourceHtml,
 		versions,
 		events,
 		runs,
