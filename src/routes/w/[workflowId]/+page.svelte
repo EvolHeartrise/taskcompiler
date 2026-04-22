@@ -3,6 +3,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { PageProps } from './$types';
 	import type { Event, HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
 
@@ -38,7 +39,7 @@
 	);
 
 	function tabQuery(id: TabId, extra?: Record<string, string>): string {
-		const sp = new URLSearchParams(page.url.searchParams);
+		const sp = new SvelteURLSearchParams(page.url.searchParams);
 		sp.set('tab', id);
 		if (extra) {
 			for (const [k, v] of Object.entries(extra)) sp.set(k, v);
@@ -181,7 +182,9 @@
 		<div class="banner banner-error">
 			<strong>Generation failed</strong>
 			{#if data.inFlight.gen.error}
-				<span class="muted small">{data.inFlight.gen.error.name}: {data.inFlight.gen.error.message}</span>
+				<span class="muted small"
+					>{data.inFlight.gen.error.name}: {data.inFlight.gen.error.message}</span
+				>
 			{/if}
 		</div>
 	{/if}
@@ -193,8 +196,14 @@
 	{/if}
 	<section class="grid">
 		<div class="card stats">
-			<div class="stat"><div class="k">Events</div><div class="v">{data.stats.totalEvents}</div></div>
-			<div class="stat"><div class="k">Runs</div><div class="v">{data.stats.totalRuns}</div></div>
+			<div class="stat">
+				<div class="k">Events</div>
+				<div class="v">{data.stats.totalEvents}</div>
+			</div>
+			<div class="stat">
+				<div class="k">Runs</div>
+				<div class="v">{data.stats.totalRuns}</div>
+			</div>
 			<div class="stat">
 				<div class="k">Failed runs</div>
 				<div class="v" class:danger={data.stats.totalFailed > 0}>{data.stats.totalFailed}</div>
@@ -246,12 +255,16 @@
 						<div><strong>eventId:</strong> <span class="mono">{triggerResult.eventId}</span></div>
 						<div><strong>runId:</strong> <span class="mono">{triggerResult.runId}</span></div>
 						{#if triggerResult.result !== null && triggerResult.result !== undefined}
-							<details><summary>result</summary><pre>{safeJson(triggerResult.result)}</pre></details>
+							<details>
+								<summary>result</summary>
+								<pre>{safeJson(triggerResult.result)}</pre>
+							</details>
 						{/if}
 						{#if triggerResult.error}
-							<details open
-								><summary>error</summary><pre>{safeJson(triggerResult.error)}</pre></details
-							>
+							<details open>
+								<summary>error</summary>
+								<pre>{safeJson(triggerResult.error)}</pre>
+							</details>
 						{/if}
 					</div>
 				{:else if 'error' in triggerResult}
@@ -263,8 +276,8 @@
 		<div class="card">
 			<h2>Replay failed events</h2>
 			<p class="muted small">
-				Re-executes every failed event through the current version. Successful replays are
-				counted as new OK runs, and the original failures are marked superseded.
+				Re-executes every failed event through the current version. Successful replays are counted
+				as new OK runs, and the original failures are marked superseded.
 			</p>
 			<form
 				method="POST"
@@ -319,7 +332,10 @@
 								<div class="details">
 									<div class="kv"><span>event id</span><code>{ev.id}</code></div>
 									{#if run}
-										<div class="kv"><span>latest run</span><code>{run.id}</code> <span class="badge {run.status}">{run.status}</span></div>
+										<div class="kv">
+											<span>latest run</span><code>{run.id}</code>
+											<span class="badge {run.status}">{run.status}</span>
+										</div>
 									{/if}
 									<div class="block">
 										<div class="label">payload</div>
@@ -378,7 +394,10 @@
 										<div class="block">
 											<div class="label">logs</div>
 											<pre>{run.logs
-													.map((l) => `[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`)
+													.map(
+														(l) =>
+															`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
+													)
 													.join('\n')}</pre>
 										</div>
 									{/if}
@@ -434,8 +453,7 @@
 												href={resolve(
 													`/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/w/[workflowId]?${string}`,
 													{ workflowId: data.workflow.id }
-												)}
-												><code>{heal.id}</code></a
+												)}><code>{heal.id}</code></a
 											>
 											<span class="badge {heal.status}">{heal.status}</span>
 										</div>
@@ -452,7 +470,10 @@
 										<div class="block">
 											<div class="label">logs</div>
 											<pre>{run.logs
-													.map((l) => `[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`)
+													.map(
+														(l) =>
+															`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
+													)
 													.join('\n')}</pre>
 										</div>
 									{/if}
@@ -558,7 +579,8 @@
 												type="button"
 												onclick={() => toggle(transcriptOpen, h.id)}
 											>
-												{transcriptOpen[h.id] ? '▾' : '▸'} agent transcript ({h.agentTranscript.length})
+												{transcriptOpen[h.id] ? '▾' : '▸'} agent transcript ({h.agentTranscript
+													.length})
 											</button>
 											{#if transcriptOpen[h.id]}
 												<ul class="transcript">
@@ -638,6 +660,8 @@
 				</div>
 				<div class="code">
 					{#if data.selectedVersionSourceHtml}
+						<!-- Trusted HTML: shiki syntax-highlighter output, not user input. -->
+						<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 						{@html data.selectedVersionSourceHtml}
 					{:else}
 						<pre><code>{selectedVersion.sourceTs}</code></pre>

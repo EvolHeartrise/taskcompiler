@@ -9,12 +9,12 @@ import {
 
 // The bootstrap source strings are pre-inlined into a generated TS module
 // (see scripts/generate-templates.ts). We avoid Vite's `?raw` suffix here so
-// wrangler's esbuild — which doesn't understand `?raw` — can also bundle this
-// file when it bundles `src/worker.ts` for deployment.
+// Wrangler's esbuild — which doesn't understand `?raw` — can also bundle this
+// File when it bundles `src/worker.ts` for deployment.
 import {
-	bootstrapMainSource,
 	bootstrapCtxSource,
-	bootstrapErrorSource
+	bootstrapErrorSource,
+	bootstrapMainSource
 } from './templates.generated';
 
 export type WfpBinding =
@@ -49,15 +49,17 @@ const METADATA_MIME = 'application/json';
 function transpile(source: string, label: string): string {
 	try {
 		return transform(source, { transforms: ['typescript'] }).code;
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		throw new Error(`Failed to transpile ${label}: ${message}`);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Failed to transpile ${label}: ${message}`, { cause: error });
 	}
 }
 
 function truncate(s: string, max: number): string {
-	if (s.length <= max) return s;
-	return s.slice(0, max) + `… [+${s.length - max} chars]`;
+	if (s.length <= max) {
+		return s;
+	}
+	return `${s.slice(0, max)}… [+${s.length - max} chars]`;
 }
 
 function requireEnv(): { accountId: string; token: string } {
@@ -65,8 +67,12 @@ function requireEnv(): { accountId: string; token: string } {
 	const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 	const token = env.CLOUDFLARE_API_TOKEN;
 	const missing: string[] = [];
-	if (!accountId) missing.push('CLOUDFLARE_ACCOUNT_ID');
-	if (!token) missing.push('CLOUDFLARE_API_TOKEN');
+	if (!accountId) {
+		missing.push('CLOUDFLARE_ACCOUNT_ID');
+	}
+	if (!token) {
+		missing.push('CLOUDFLARE_API_TOKEN');
+	}
 	if (missing.length > 0) {
 		throw new Error(`WFP upload misconfigured: missing ${missing.join(', ')} in env bindings.`);
 	}
@@ -86,15 +92,15 @@ export async function uploadWorkflow(input: UploadInput): Promise<UploadResult> 
 	const errorJs = transpile(bootstrapErrorSource, 'bootstrap error.ts');
 
 	const bindings: WfpBinding[] = [
-		{ type: 'd1', name: 'DB', database_id: DEFAULT_D1_DATABASE_ID },
+		{ database_id: DEFAULT_D1_DATABASE_ID, name: 'DB', type: 'd1' },
 		...(input.bindings ?? [])
 	];
 
 	const metadata = {
-		main_module: 'main.js',
 		bindings,
 		compatibility_date: COMPATIBILITY_DATE,
-		compatibility_flags: [...COMPATIBILITY_FLAGS]
+		compatibility_flags: [...COMPATIBILITY_FLAGS],
+		main_module: 'main.js'
 	};
 
 	const fd = new FormData();
@@ -105,9 +111,9 @@ export async function uploadWorkflow(input: UploadInput): Promise<UploadResult> 
 	fd.append('workflow.js', new Blob([userJs], { type: MODULE_MIME }), 'workflow.js');
 
 	const res = await fetch(scriptUrl(accountId, input.scriptName), {
-		method: 'PUT',
+		body: fd,
 		headers: { Authorization: `Bearer ${token}` },
-		body: fd
+		method: 'PUT'
 	});
 
 	if (!res.ok) {
@@ -126,12 +132,16 @@ export async function deleteWorkflow(scriptName: string): Promise<void> {
 	const { accountId, token } = requireEnv();
 
 	const res = await fetch(scriptUrl(accountId, scriptName), {
-		method: 'DELETE',
-		headers: { Authorization: `Bearer ${token}` }
+		headers: { Authorization: `Bearer ${token}` },
+		method: 'DELETE'
 	});
 
-	if (res.status === 404) return;
-	if (res.ok) return;
+	if (res.status === 404) {
+		return;
+	}
+	if (res.ok) {
+		return;
+	}
 
 	const text = await res.text().catch(() => '');
 	let parsed: CloudflareApiError | undefined;
@@ -139,7 +149,7 @@ export async function deleteWorkflow(scriptName: string): Promise<void> {
 		try {
 			parsed = JSON.parse(text) as CloudflareApiError;
 		} catch {
-			// fall through to raw text
+			// Fall through to raw text
 		}
 	}
 	const detail = parsed?.errors?.length
