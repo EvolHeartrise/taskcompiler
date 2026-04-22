@@ -1,18 +1,10 @@
-import { createEvent, getEvent } from "$lib/server/db/queries/events";
-import {
-	createRun,
-	finishRunFailed,
-	finishRunOk,
-} from "$lib/server/db/queries/runs";
-import { getCurrentVersion } from "$lib/server/db/queries/versions";
-import { getWorkflow } from "$lib/server/db/queries/workflows";
-import type {
-	EventTriggerType,
-	RunError,
-	RunLogEntry,
-	RunStatus,
-} from "$lib/server/db/types";
-import { getEnv } from "$lib/server/env";
+import { createEvent, getEvent } from '$lib/server/db/queries/events';
+import { getActiveHealSession } from '$lib/server/db/queries/heals';
+import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
+import { getCurrentVersion } from '$lib/server/db/queries/versions';
+import { getWorkflow } from '$lib/server/db/queries/workflows';
+import type { EventTriggerType, RunError, RunLogEntry, RunStatus } from '$lib/server/db/types';
+import { getEnv } from '$lib/server/env';
 
 export interface ExecuteOptions {
 	workflowId: string;
@@ -48,7 +40,7 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 	const next = prev.then(fn, fn);
 	chains.set(
 		key,
-		next.catch(() => {}),
+		next.catch(() => {})
 	);
 	return next as Promise<T>;
 }
@@ -56,30 +48,27 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 function toRunError(err: unknown): RunError {
 	if (err instanceof Error) {
 		const out: RunError = {
-			name: err.name || "Error",
-			message: err.message || String(err),
+			name: err.name || 'Error',
+			message: err.message || String(err)
 		};
 		if (err.stack) out.stack = err.stack;
 		return out;
 	}
-	if (typeof err === "object" && err !== null) {
+	if (typeof err === 'object' && err !== null) {
 		const anyErr = err as { name?: unknown; message?: unknown; stack?: unknown };
 		const out: RunError = {
-			name: typeof anyErr.name === "string" ? anyErr.name : "NonError",
-			message:
-				typeof anyErr.message === "string"
-					? anyErr.message
-					: safeStringify(err),
+			name: typeof anyErr.name === 'string' ? anyErr.name : 'NonError',
+			message: typeof anyErr.message === 'string' ? anyErr.message : safeStringify(err)
 		};
-		if (typeof anyErr.stack === "string") out.stack = anyErr.stack;
+		if (typeof anyErr.stack === 'string') out.stack = anyErr.stack;
 		return out;
 	}
-	return { name: "NonError", message: safeStringify(err) };
+	return { name: 'NonError', message: safeStringify(err) };
 }
 
 function safeStringify(v: unknown): string {
 	try {
-		return typeof v === "string" ? v : JSON.stringify(v);
+		return typeof v === 'string' ? v : JSON.stringify(v);
 	} catch {
 		return String(v);
 	}
@@ -98,7 +87,7 @@ export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult>
 		workflowId: workflow.id,
 		triggerType: opts.trigger,
 		payload: opts.payload,
-		dedupKey: opts.dedupKey ?? null,
+		dedupKey: opts.dedupKey ?? null
 	});
 
 	return executeExistingEvent(event.id);
@@ -106,7 +95,7 @@ export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult>
 
 export async function executeExistingEvent(
 	eventId: string,
-	opts: ExecuteExistingOptions = {},
+	opts: ExecuteExistingOptions = {}
 ): Promise<ExecuteResult> {
 	const event = await getEvent(eventId);
 	if (!event) throw new Error(`Event not found: ${eventId}`);
@@ -125,7 +114,7 @@ export async function executeExistingEvent(
 			workflowId: workflow.id,
 			versionId: version.id,
 			isReplay: opts.isReplay ?? false,
-			parentRunId: opts.parentRunId ?? null,
+			parentRunId: opts.parentRunId ?? null
 		});
 
 		let runError: RunError | null = null;
@@ -135,20 +124,20 @@ export async function executeExistingEvent(
 		try {
 			const env = getEnv();
 			const response = await env.DISPATCHER.get(version.deployPath).fetch(
-				"https://workflow.invoke/",
+				'https://workflow.invoke/',
 				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
 					body: JSON.stringify({
 						workflow: { id: workflow.id, name: workflow.name },
 						event: {
 							id: event.id,
 							triggerType: event.triggerType,
 							receivedAt: event.receivedAt,
-							payload: event.payload,
-						},
-					}),
-				},
+							payload: event.payload
+						}
+					})
+				}
 			);
 
 			const body = (await response.json()) as InvokeResponseBody;
@@ -158,8 +147,8 @@ export async function executeExistingEvent(
 				runResult = body.result;
 			} else {
 				runError = body.error ?? {
-					name: "Error",
-					message: "workflow reported failure with no error",
+					name: 'Error',
+					message: 'workflow reported failure with no error'
 				};
 			}
 		} catch (err) {
@@ -171,29 +160,39 @@ export async function executeExistingEvent(
 			return {
 				eventId: event.id,
 				runId: run.id,
-				status: "ok" as const,
-				result: runResult,
+				status: 'ok' as const,
+				result: runResult
 			};
 		}
 
 		await finishRunFailed(run.id, runError, runLogs);
-		try {
-			const env = getEnv();
-			await env.HEAL_WORKFLOW.create({
-				id: `heal-${run.id}`,
-				params: {
-					workflowId: workflow.id,
-					triggeringRunId: run.id,
-				},
-			});
-		} catch (err) {
-			console.error("failed to start HEAL_WORKFLOW for runId=" + run.id, err);
+		// Dedup: at most one in-flight heal per workflow. Small race window
+		// (two simultaneous failures can both spawn) bounds waste to ~2×.
+		// Missed failures are replayed by the winning heal's post-deploy sweep.
+		const activeHeal = await getActiveHealSession(workflow.id);
+		if (activeHeal) {
+			console.log(
+				`[heal] skipping create for runId=${run.id}: active session already running (sessionId=${activeHeal.id})`
+			);
+		} else {
+			try {
+				const env = getEnv();
+				await env.HEAL_WORKFLOW.create({
+					id: `heal-${run.id}`,
+					params: {
+						workflowId: workflow.id,
+						triggeringRunId: run.id
+					}
+				});
+			} catch (err) {
+				console.error('failed to start HEAL_WORKFLOW for runId=' + run.id, err);
+			}
 		}
 		return {
 			eventId: event.id,
 			runId: run.id,
-			status: "failed" as const,
-			error: runError,
+			status: 'failed' as const,
+			error: runError
 		};
 	});
 }
