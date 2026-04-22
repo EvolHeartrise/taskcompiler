@@ -1,0 +1,22 @@
+{
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
+	"useTabs": true,
+	"singleQuote": true,
+	"trailingComma": "none",
+	"printWidth": 100,
+	"sortPackageJson": false,
+	"ignorePatterns": [
+		"package-lock.json",
+		"pnpm-lock.yaml",
+		"yarn.lock",
+		"bun.lock",
+		"bun.lockb",
+		"/static/",
+		".svelte-kit/",
+		".wrangler/",
+		"build/",
+		"node_modules/",
+		"worker-configuration.d.ts",
+		"src/lib/server/wfp/templates.generated.ts"
+	]
+}
