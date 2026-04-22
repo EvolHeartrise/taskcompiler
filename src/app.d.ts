@@ -5,6 +5,7 @@ import type {
 	CfProperties,
 	ExecutionContext,
 	DispatchNamespace,
+	SendEmail,
 	Workflow
 } from '@cloudflare/workers-types';
 import type { GenWorkflowParams } from '$lib/server/workflows/gen-flow';
@@ -34,11 +35,11 @@ declare global {
 		CLOUDFLARE_GATEWAY_NAME: string;
 		GEN_WORKFLOW: Workflow<GenWorkflowParams>;
 		HEAL_WORKFLOW: Workflow<HealWorkflowParams>;
+		EMAIL: SendEmail;
 		BETTER_AUTH_SECRET: string;
 		APP_URL?: string;
 		GOOGLE_CLIENT_ID?: string;
 		GOOGLE_CLIENT_SECRET?: string;
-		RESEND_API_KEY?: string;
 		EMAIL_FROM?: string;
 	}
 }

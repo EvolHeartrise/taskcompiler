@@ -45,28 +45,26 @@ function buildAuth(env: Env) {
 }
 
 async function sendMagicLinkEmail(env: Env, email: string, url: string) {
-	// Without a Resend key we log the link so dev/staging still works end-to-end.
-	if (!env.RESEND_API_KEY) {
+	// No verified sender domain yet — log the link so auth works end-to-end
+	// via `wrangler tail`. Set EMAIL_FROM (e.g. "Runely <auth@yourdomain.com>")
+	// once the domain is on Cloudflare DNS and Email Service is enabled.
+	if (!env.EMAIL_FROM) {
 		console.log(`[auth] magic link for ${email}: ${url}`);
 		return;
 	}
-	const from = env.EMAIL_FROM ?? 'Runely <onboarding@resend.dev>';
-	const res = await fetch('https://api.resend.com/emails', {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${env.RESEND_API_KEY}`,
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify({
-			from,
+	try {
+		await env.EMAIL.send({
+			from: env.EMAIL_FROM,
 			to: email,
 			subject: 'Sign in to Runely',
-			html: `<p>Click the link below to sign in to Runely. It expires in 5 minutes.</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, ignore this email.</p>`
-		})
-	});
-	if (!res.ok) {
-		const body = await res.text().catch(() => '');
-		throw new Error(`resend send failed: ${res.status} ${body.slice(0, 200)}`);
+			html: `<p>Click the link below to sign in to Runely. It expires in 5 minutes.</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, ignore this email.</p>`,
+			text: `Sign in to Runely: ${url}\n\nThis link expires in 5 minutes. If you didn't request it, ignore this email.`
+		});
+	} catch (err) {
+		// Fall back to console logging so a misconfigured sender domain doesn't
+		// lock users out during the beta.
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`[auth] EMAIL.send failed (${msg}); magic link for ${email}: ${url}`);
 	}
 }
 
