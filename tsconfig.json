@@ -10,6 +10,9 @@
 		"skipLibCheck": true,
 		"sourceMap": true,
 		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noFallthroughCasesInSwitch": true,
+		"noImplicitReturns": true,
 		"moduleResolution": "bundler",
 		"types": ["node", "bun-types"]
 	},
