@@ -1,13 +1,17 @@
 <script lang="ts">
 	import favicon from '$lib/assets/favicon.svg';
 	import { resolve } from '$app/paths';
-	import type { Snippet } from 'svelte';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { authClient } from '$lib/auth-client';
+	import type { LayoutProps } from './$types';
 
-	interface Props {
-		children: Snippet;
+	let { data, children }: LayoutProps = $props();
+
+	async function signOut() {
+		await authClient.signOut();
+		await invalidateAll();
+		await goto('/auth');
 	}
-
-	let { children }: Props = $props();
 </script>
 
 <svelte:head>
@@ -19,10 +23,14 @@
 	<header class="site-header">
 		<div class="container">
 			<a class="brand" href={resolve('/')}>Runely</a>
-			<nav>
-				<a href={resolve('/')}>Workflows</a>
-				<a href={resolve('/new')}>New</a>
-			</nav>
+			{#if data.user}
+				<nav>
+					<a href={resolve('/')}>Workflows</a>
+					<a href={resolve('/new')}>New</a>
+					<span class="who">{data.user.email}</span>
+					<button type="button" class="signout" onclick={signOut}>Sign out</button>
+				</nav>
+			{/if}
 		</div>
 	</header>
 	<main class="container">
@@ -37,14 +45,7 @@
 		background: #fafafa;
 		color: #1a1a1a;
 		font-family:
-			-apple-system,
-			BlinkMacSystemFont,
-			'Segoe UI',
-			Roboto,
-			Oxygen,
-			Ubuntu,
-			Cantarell,
-			sans-serif;
+			-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
 		font-size: 14px;
 		line-height: 1.5;
 	}
@@ -63,13 +64,7 @@
 	}
 	:global(code, pre) {
 		font-family:
-			ui-monospace,
-			SFMono-Regular,
-			Menlo,
-			Monaco,
-			Consolas,
-			'Liberation Mono',
-			'Courier New',
+			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
 			monospace;
 		font-size: 12.5px;
 	}
@@ -98,10 +93,30 @@
 	}
 	nav {
 		display: flex;
+		align-items: center;
 		gap: 16px;
 	}
 	nav a {
 		color: #4b5563;
+	}
+	.who {
+		color: #6b7280;
+		font-size: 13px;
+		padding-left: 4px;
+		border-left: 1px solid #e5e7eb;
+		margin-left: 4px;
+		padding-inline-start: 10px;
+	}
+	.signout {
+		background: none;
+		border: none;
+		color: #4b5563;
+		cursor: pointer;
+		padding: 0;
+		text-decoration: underline;
+	}
+	.signout:hover {
+		color: #111;
 	}
 	.container {
 		max-width: 1100px;

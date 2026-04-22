@@ -1,11 +1,12 @@
-export type TriggerType = "webhook" | "cron" | "both";
-export type EventTriggerType = "webhook" | "cron" | "manual" | "replay";
-export type RunStatus = "running" | "ok" | "failed" | "superseded";
-export type HealStatus = "running" | "success" | "failed" | "abandoned";
-export type VersionCreatedBy = "user" | "heal";
+export type TriggerType = 'webhook' | 'cron' | 'both';
+export type EventTriggerType = 'webhook' | 'cron' | 'manual' | 'replay';
+export type RunStatus = 'running' | 'ok' | 'failed' | 'superseded';
+export type HealStatus = 'running' | 'success' | 'failed' | 'abandoned';
+export type VersionCreatedBy = 'user' | 'heal';
 
 export interface Workflow {
 	id: string;
+	userId: string;
 	name: string;
 	prompt: string;
 	currentVersionId: string | null;
@@ -44,7 +45,7 @@ export interface RunError {
 }
 
 export interface RunLogEntry {
-	level: "debug" | "info" | "warn" | "error";
+	level: 'debug' | 'info' | 'warn' | 'error';
 	message: string;
 	ts: number;
 	data?: unknown;
@@ -80,7 +81,7 @@ export interface HealTestResults {
 
 export interface HealAgentTranscriptEntry {
 	ts: number;
-	role: "system" | "agent" | "tool" | "observation";
+	role: 'system' | 'agent' | 'tool' | 'observation';
 	message: string;
 	data?: unknown;
 }

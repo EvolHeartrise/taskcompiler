@@ -1,17 +1,10 @@
 import { error, fail } from '@sveltejs/kit';
 import type { Workflow } from '@cloudflare/workers-types';
 import type { Actions, PageServerLoad } from './$types';
-import { getWorkflow } from '$lib/server/db/queries/workflows';
-import {
-	getCurrentVersion,
-	getVersion,
-	listVersions
-} from '$lib/server/db/queries/versions';
+import { getWorkflowForUser } from '$lib/server/db/queries/workflows';
+import { getCurrentVersion, getVersion, listVersions } from '$lib/server/db/queries/versions';
 import { listEventsForWorkflow } from '$lib/server/db/queries/events';
-import {
-	listFailedRunsForWorkflow,
-	listRunsForWorkflow
-} from '$lib/server/db/queries/runs';
+import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listHealSessionsForWorkflow } from '$lib/server/db/queries/heals';
 import { executeEvent, replayFailedEvents } from '$lib/server/engine';
 
@@ -41,8 +34,9 @@ async function fetchInstanceStatus(
 	}
 }
 
-export const load: PageServerLoad = async ({ params, url, platform }) => {
-	const workflow = await getWorkflow(params.workflowId);
+export const load: PageServerLoad = async ({ params, url, platform, locals }) => {
+	if (!locals.user) error(401, 'unauthorized');
+	const workflow = await getWorkflowForUser(params.workflowId, locals.user.id);
 	if (!workflow) error(404, 'Workflow not found');
 
 	const [currentVersion, versions, events, allRuns, failedRuns, heals] = await Promise.all([
@@ -104,8 +98,16 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 	};
 };
 
+async function assertOwnership(workflowId: string, userId: string | undefined): Promise<void> {
+	if (!userId) error(401, 'unauthorized');
+	const wf = await getWorkflowForUser(workflowId, userId);
+	if (!wf) error(404, 'Workflow not found');
+}
+
 export const actions: Actions = {
-	trigger: async ({ params, request }) => {
+	trigger: async ({ params, request, locals }) => {
+		await assertOwnership(params.workflowId, locals.user?.id);
+
 		const data = await request.formData();
 		const raw = (data.get('payload') ?? '').toString();
 
@@ -139,7 +141,8 @@ export const actions: Actions = {
 		}
 	},
 
-	replay: async ({ params }) => {
+	replay: async ({ params, locals }) => {
+		await assertOwnership(params.workflowId, locals.user?.id);
 		try {
 			const result = await replayFailedEvents(params.workflowId);
 			return {

@@ -3,6 +3,7 @@ import type { TriggerType, Workflow } from '../types.ts';
 
 interface WorkflowRow {
 	id: string;
+	user_id: string;
 	name: string;
 	prompt: string;
 	current_version_id: string | null;
@@ -16,6 +17,7 @@ interface WorkflowRow {
 function rowToWorkflow(row: WorkflowRow): Workflow {
 	return {
 		id: row.id,
+		userId: row.user_id,
 		name: row.name,
 		prompt: row.prompt,
 		currentVersionId: row.current_version_id,
@@ -29,6 +31,7 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
 
 export interface CreateWorkflowInput {
 	id?: string;
+	userId: string;
 	name: string;
 	prompt: string;
 	triggerType: TriggerType;
@@ -40,10 +43,19 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 	const ts = now();
 	await getDb()
 		.prepare(
-			`INSERT INTO workflows (id, name, prompt, current_version_id, trigger_type, cron_expr, created_at, updated_at, last_fired_at)
-			 VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 0)`
+			`INSERT INTO workflows (id, user_id, name, prompt, current_version_id, trigger_type, cron_expr, created_at, updated_at, last_fired_at)
+			 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 0)`
 		)
-		.bind(id, input.name, input.prompt, input.triggerType, input.cronExpr ?? null, ts, ts)
+		.bind(
+			id,
+			input.userId,
+			input.name,
+			input.prompt,
+			input.triggerType,
+			input.cronExpr ?? null,
+			ts,
+			ts
+		)
 		.run();
 	const row = await getDb()
 		.prepare(`SELECT * FROM workflows WHERE id = ?`)
@@ -53,6 +65,8 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 	return rowToWorkflow(row);
 }
 
+// System-level lookup (cron/webhook/executor/heal). Does not enforce user_id;
+// callers already trust the id. Prefer `getWorkflowForUser` in UI code paths.
 export async function getWorkflow(id: string): Promise<Workflow | null> {
 	const row = await getDb()
 		.prepare(`SELECT * FROM workflows WHERE id = ?`)
@@ -61,9 +75,18 @@ export async function getWorkflow(id: string): Promise<Workflow | null> {
 	return row ? rowToWorkflow(row) : null;
 }
 
-export async function listWorkflows(): Promise<Workflow[]> {
+export async function getWorkflowForUser(id: string, userId: string): Promise<Workflow | null> {
+	const row = await getDb()
+		.prepare(`SELECT * FROM workflows WHERE id = ? AND user_id = ?`)
+		.bind(id, userId)
+		.first<WorkflowRow>();
+	return row ? rowToWorkflow(row) : null;
+}
+
+export async function listWorkflowsForUser(userId: string): Promise<Workflow[]> {
 	const res = await getDb()
-		.prepare(`SELECT * FROM workflows ORDER BY created_at DESC`)
+		.prepare(`SELECT * FROM workflows WHERE user_id = ? ORDER BY created_at DESC`)
+		.bind(userId)
 		.all<WorkflowRow>();
 	return res.results.map(rowToWorkflow);
 }
