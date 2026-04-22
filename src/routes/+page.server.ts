@@ -1,10 +1,12 @@
+import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listWorkflows } from '$lib/server/db/queries/workflows';
+import { listWorkflowsForUser } from '$lib/server/db/queries/workflows';
 import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listEventsForWorkflow } from '$lib/server/db/queries/events';
 
-export const load: PageServerLoad = async () => {
-	const workflows = await listWorkflows();
+export const load: PageServerLoad = async ({ locals }) => {
+	if (!locals.user) throw error(401, 'unauthorized');
+	const workflows = await listWorkflowsForUser(locals.user.id);
 
 	const enriched = await Promise.all(
 		workflows.map(async (w) => {

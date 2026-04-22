@@ -26,12 +26,17 @@ export const actions: Actions = {
 		if (!event.platform) {
 			return fail(500, { values, error: 'Platform bindings unavailable.' });
 		}
+		if (!event.locals.user) {
+			return fail(401, { values, error: 'Not signed in.' });
+		}
 
 		const workflowId = crypto.randomUUID();
+		const userId = event.locals.user.id;
 
 		try {
 			await createWorkflow({
 				id: workflowId,
+				userId,
 				name,
 				prompt,
 				triggerType: trigger,

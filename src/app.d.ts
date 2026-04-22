@@ -13,7 +13,10 @@ import type { HealWorkflowParams } from '$lib/server/workflows/heal-flow';
 declare global {
 	namespace App {
 		// interface Error {}
-		interface Locals {}
+		interface Locals {
+			user: { id: string; email: string; name: string; image: string | null } | null;
+			session: { id: string; token: string; expiresAt: Date; userId: string } | null;
+		}
 		// interface PageData {}
 		// interface PageState {}
 		interface Platform {
@@ -31,6 +34,12 @@ declare global {
 		CLOUDFLARE_GATEWAY_NAME: string;
 		GEN_WORKFLOW: Workflow<GenWorkflowParams>;
 		HEAL_WORKFLOW: Workflow<HealWorkflowParams>;
+		BETTER_AUTH_SECRET: string;
+		APP_URL?: string;
+		GOOGLE_CLIENT_ID?: string;
+		GOOGLE_CLIENT_SECRET?: string;
+		RESEND_API_KEY?: string;
+		EMAIL_FROM?: string;
 	}
 }
 

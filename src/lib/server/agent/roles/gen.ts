@@ -5,7 +5,7 @@ import {
 	type AgentRunResult,
 	type Tool
 } from '../index.ts';
-import { createWorkflow, getWorkflow } from '$lib/server/db/queries/workflows';
+import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
 import type { TriggerType } from '$lib/server/db/types';
@@ -235,18 +235,14 @@ export async function generateWorkflow(
 
 	const sourceTs = emitState.emitted.sourceTs;
 
-	// If the caller pre-inserted the workflow row (UI form action does this so
-	// /w/[id] can render while generation is pending), reuse it. Otherwise
-	// create the row now.
-	let workflow = opts.workflowIdOverride ? await getWorkflow(opts.workflowIdOverride) : null;
+	// The /new form action pre-inserts the workflow row so /w/[id] can render
+	// while generation is pending. The id is passed in via workflowIdOverride.
+	if (!opts.workflowIdOverride) {
+		throw new Error('generateWorkflow: workflowIdOverride is required (caller must pre-insert)');
+	}
+	const workflow = await getWorkflow(opts.workflowIdOverride);
 	if (!workflow) {
-		workflow = await createWorkflow({
-			id: opts.workflowIdOverride,
-			name: opts.name,
-			prompt: opts.prompt,
-			triggerType: opts.triggerType,
-			cronExpr: opts.cronExpr ?? null
-		});
+		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
 	}
 
 	const deployPath = await writeVersion(workflow.id, 1, sourceTs);
