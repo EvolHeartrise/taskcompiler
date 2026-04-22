@@ -23,6 +23,11 @@ function buildAuth(env: Env) {
 			expiresIn: 60 * 60 * 24 * 30,
 			updateAge: 60 * 60 * 24
 		},
+		advanced: {
+			// Cloudflare forwards the real client IP in CF-Connecting-IP. Telling
+			// Better Auth about it enables rate limiting on sign-in endpoints.
+			ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] }
+		},
 		emailAndPassword: { enabled: false },
 		socialProviders:
 			env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
