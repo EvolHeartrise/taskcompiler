@@ -1,24 +1,20 @@
 import {
 	createMessage,
-	type AnthropicContentBlock,
-	type AnthropicMessage,
-	type AnthropicToolResultBlock
-} from "./ai-gateway.ts";
-import {
-	runToolCall,
-	toolToAnthropicDefinition,
-	type Tool,
-	type ToolCtx
-} from "./tools.ts";
+	type AgentMessage,
+	type AgentTool,
+	type ContentBlock,
+	type ToolResultBlock
+} from './ai-gateway.ts';
+import { runToolCall, toolToAgentDefinition, type Tool, type ToolCtx } from './tools.ts';
 
-export const DEFAULT_MODEL = "claude-sonnet-4-6";
+export const DEFAULT_MODEL = '@cf/moonshotai/kimi-k2.6';
 const DEFAULT_MAX_TOKENS = 4096;
 
 export type AgentEvent =
-	| { type: "assistant_message"; content: string }
-	| { type: "tool_call"; id: string; name: string; args: unknown }
-	| { type: "tool_result"; id: string; ok: boolean; output: string }
-	| { type: "error"; error: string };
+	| { type: 'assistant_message'; content: string }
+	| { type: 'tool_call'; id: string; name: string; args: unknown }
+	| { type: 'tool_result'; id: string; ok: boolean; output: string }
+	| { type: 'error'; error: string };
 
 export interface AgentRunOptions {
 	model?: string;
@@ -31,7 +27,7 @@ export interface AgentRunOptions {
 	abortSignal?: AbortSignal;
 }
 
-export type StopReason = "end_turn" | "max_turns" | "tool_error" | "aborted";
+export type StopReason = 'end_turn' | 'max_turns' | 'tool_error' | 'aborted';
 
 export interface AgentRunResult {
 	finalMessage: string;
@@ -41,18 +37,18 @@ export interface AgentRunResult {
 }
 
 function defaultWorkingDir(): string {
-	if (typeof process !== "undefined" && typeof process.cwd === "function") {
+	if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
 		return process.cwd();
 	}
-	return "/";
+	return '/';
 }
 
-function extractText(content: AnthropicContentBlock[]): string {
+function extractText(content: ContentBlock[]): string {
 	const parts: string[] = [];
 	for (const block of content) {
-		if (block.type === "text") parts.push(block.text);
+		if (block.type === 'text') parts.push(block.text);
 	}
-	return parts.join("");
+	return parts.join('');
 }
 
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
@@ -68,8 +64,8 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
 	const toolsByName = new Map<string, Tool>();
 	for (const t of opts.tools) toolsByName.set(t.name, t);
-	const toolDefs =
-		opts.tools.length > 0 ? opts.tools.map(toolToAnthropicDefinition) : undefined;
+	const toolDefs: AgentTool[] | undefined =
+		opts.tools.length > 0 ? opts.tools.map(toolToAgentDefinition) : undefined;
 
 	const ctx: ToolCtx = {
 		workingDir,
@@ -79,19 +75,17 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 		}
 	};
 
-	const messages: AnthropicMessage[] = [
-		{ role: "user", content: opts.userMessage }
-	];
+	const messages: AgentMessage[] = [{ role: 'user', content: opts.userMessage }];
 
-	let finalMessage = "";
-	let stopReason: StopReason = "max_turns";
+	let finalMessage = '';
+	let stopReason: StopReason = 'max_turns';
 	let turns = 0;
 
 	for (let turn = 0; turn < maxTurns; turn++) {
 		turns = turn + 1;
 
 		if (opts.abortSignal?.aborted) {
-			stopReason = "aborted";
+			stopReason = 'aborted';
 			break;
 		}
 
@@ -109,35 +103,34 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 			);
 		} catch (err) {
 			if (opts.abortSignal?.aborted) {
-				stopReason = "aborted";
+				stopReason = 'aborted';
 				break;
 			}
 			const msg = err instanceof Error ? err.message : String(err);
-			emit({ type: "error", error: msg });
-			stopReason = "tool_error";
+			emit({ type: 'error', error: msg });
+			stopReason = 'tool_error';
 			break;
 		}
 
 		const assistantBlocks = response.content;
-		messages.push({ role: "assistant", content: assistantBlocks });
+		messages.push({ role: 'assistant', content: assistantBlocks });
 
 		const assistantText = extractText(assistantBlocks);
 		if (assistantText.length > 0) {
-			emit({ type: "assistant_message", content: assistantText });
+			emit({ type: 'assistant_message', content: assistantText });
 			finalMessage = assistantText;
 		}
 
 		const toolUses = assistantBlocks.filter(
-			(b): b is Extract<AnthropicContentBlock, { type: "tool_use" }> =>
-				b.type === "tool_use"
+			(b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use'
 		);
 
 		if (toolUses.length === 0) {
-			stopReason = "end_turn";
+			stopReason = 'end_turn';
 			break;
 		}
 
-		const toolResultBlocks: AnthropicToolResultBlock[] = [];
+		const toolResultBlocks: ToolResultBlock[] = [];
 		let aborted = false;
 
 		for (const call of toolUses) {
@@ -147,45 +140,45 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 			}
 			const name = call.name;
 			const input = call.input;
-			emit({ type: "tool_call", id: call.id, name, args: input });
+			emit({ type: 'tool_call', id: call.id, name, args: input });
 
 			const tool = toolsByName.get(name);
 			if (!tool) {
 				const errText = `Unknown tool: ${name}`;
 				toolResultBlocks.push({
-					type: "tool_result",
+					type: 'tool_result',
 					tool_use_id: call.id,
 					content: errText,
 					is_error: true
 				});
-				emit({ type: "tool_result", id: call.id, ok: false, output: errText });
+				emit({ type: 'tool_result', id: call.id, ok: false, output: errText });
 				continue;
 			}
 
 			const argsJson = JSON.stringify(input ?? {});
 			const result = await runToolCall(tool, argsJson, ctx);
 			if (result.ok) {
-				const output = result.output.length > 0 ? result.output : "(no output)";
+				const output = result.output.length > 0 ? result.output : '(no output)';
 				toolResultBlocks.push({
-					type: "tool_result",
+					type: 'tool_result',
 					tool_use_id: call.id,
 					content: output
 				});
 				emit({
-					type: "tool_result",
+					type: 'tool_result',
 					id: call.id,
 					ok: true,
 					output: result.output
 				});
 			} else {
 				toolResultBlocks.push({
-					type: "tool_result",
+					type: 'tool_result',
 					tool_use_id: call.id,
 					content: result.error,
 					is_error: true
 				});
 				emit({
-					type: "tool_result",
+					type: 'tool_result',
 					id: call.id,
 					ok: false,
 					output: result.error
@@ -194,11 +187,11 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 		}
 
 		if (toolResultBlocks.length > 0) {
-			messages.push({ role: "user", content: toolResultBlocks });
+			messages.push({ role: 'user', content: toolResultBlocks });
 		}
 
 		if (aborted || opts.abortSignal?.aborted) {
-			stopReason = "aborted";
+			stopReason = 'aborted';
 			break;
 		}
 	}

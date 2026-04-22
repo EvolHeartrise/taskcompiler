@@ -6,13 +6,13 @@ export type {
 	StopReason
 } from "./loop.ts";
 export type { Tool, ToolCtx, ToolRunResult } from "./tools.ts";
-export { toolToAnthropicDefinition, runToolCall } from "./tools.ts";
+export { toolToAgentDefinition, runToolCall } from "./tools.ts";
 export { defaultTools } from "./tools/default.ts";
 export { createMessage } from "./ai-gateway.ts";
 export type {
-	AnthropicMessage,
-	AnthropicContentBlock,
-	AnthropicTool,
+	AgentMessage,
+	ContentBlock,
+	AgentTool,
 	MessagesRequest,
 	MessagesResponse
 } from "./ai-gateway.ts";
