@@ -10,7 +10,7 @@
 	async function signOut() {
 		await authClient.signOut();
 		await invalidateAll();
-		await goto('/auth');
+		await goto(resolve('/auth'));
 	}
 </script>
 

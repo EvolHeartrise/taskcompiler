@@ -1,10 +1,10 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
-// for information about these interfaces
+// For information about these interfaces
 import type {
-	D1Database,
 	CfProperties,
-	ExecutionContext,
+	D1Database,
 	DispatchNamespace,
+	ExecutionContext,
 	SendEmail,
 	Workflow
 } from '@cloudflare/workers-types';
@@ -13,13 +13,13 @@ import type { HealWorkflowParams } from '$lib/server/workflows/heal-flow';
 
 declare global {
 	namespace App {
-		// interface Error {}
+		// Interface Error {}
 		interface Locals {
 			user: { id: string; email: string; name: string; image: string | null } | null;
 			session: { id: string; token: string; expiresAt: Date; userId: string } | null;
 		}
-		// interface PageData {}
-		// interface PageState {}
+		// Interface PageData {}
+		// Interface PageState {}
 		interface Platform {
 			env: Env;
 			cf: CfProperties;
@@ -43,5 +43,3 @@ declare global {
 		EMAIL_FROM?: string;
 	}
 }
-
-export {};

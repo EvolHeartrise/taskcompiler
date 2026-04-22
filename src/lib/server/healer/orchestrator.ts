@@ -1,7 +1,7 @@
-import { replayFailedEvents, type ReplayResult } from '$lib/server/engine/replay';
+import { type ReplayResult, replayFailedEvents } from '$lib/server/engine/replay';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
-import { getCurrentVersion, createVersion } from '$lib/server/db/queries/versions';
+import { createVersion, getCurrentVersion } from '$lib/server/db/queries/versions';
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { finishHealSession, getHealSession } from '$lib/server/db/queries/heals';
 import { writeVersion } from '$lib/server/workflows-store';
@@ -9,8 +9,8 @@ import type { HealOutcome } from '$lib/server/agent/roles/heal';
 import type { AgentEvent } from '$lib/server/agent';
 import type {
 	HealAgentTranscriptEntry,
-	HealTestResults,
-	HealTestResultDetail
+	HealTestResultDetail,
+	HealTestResults
 } from '$lib/server/db/types';
 
 const EARLY_OUT_FAIL_THRESHOLD = 5;
@@ -31,25 +31,25 @@ export function agentEventsToTranscript(events: AgentEvent[]): HealAgentTranscri
 	const now = Date.now();
 	return events.map((e): HealAgentTranscriptEntry => {
 		if (e.type === 'assistant_message') {
-			return { ts: now, role: 'agent', message: e.content };
+			return { message: e.content, role: 'agent', ts: now };
 		}
 		if (e.type === 'tool_call') {
 			return {
-				ts: now,
-				role: 'tool',
+				data: { args: e.args, id: e.id },
 				message: `call ${e.name}`,
-				data: { id: e.id, args: e.args }
+				role: 'tool',
+				ts: now
 			};
 		}
 		if (e.type === 'tool_result') {
 			return {
-				ts: now,
-				role: 'observation',
+				data: { id: e.id, ok: e.ok, output: e.output },
 				message: e.ok ? 'tool_result ok' : 'tool_result error',
-				data: { id: e.id, ok: e.ok, output: e.output }
+				role: 'observation',
+				ts: now
 			};
 		}
-		return { ts: now, role: 'system', message: `error: ${e.error}` };
+		return { message: `error: ${e.error}`, role: 'system', ts: now };
 	});
 }
 
@@ -60,7 +60,9 @@ export function computeDiff(oldSource: string, newSource: string): string {
 	const n = b.length;
 
 	// LCS table
-	const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0));
+	const dp: number[][] = Array.from({ length: m + 1 }, () =>
+		Array.from<number>({ length: n + 1 }, () => 0)
+	);
 	for (let i = m - 1; i >= 0; i--) {
 		for (let j = n - 1; j >= 0; j--) {
 			if (a[i] === b[j]) {
@@ -101,14 +103,16 @@ export function computeDiff(oldSource: string, newSource: string): string {
 export function outcomeTestResultsToDb(outcome: HealOutcome): HealTestResults {
 	const details: HealTestResultDetail[] = outcome.testResults.details.map((d) => {
 		const out: HealTestResultDetail = { eventId: d.eventId, ok: d.ok };
-		if (d.error) out.error = d.error;
+		if (d.error) {
+			out.error = d.error;
+		}
 		return out;
 	});
 	return {
-		total: outcome.testResults.total,
-		passed: outcome.testResults.passed,
+		details,
 		failed: outcome.testResults.failed,
-		details
+		passed: outcome.testResults.passed,
+		total: outcome.testResults.total
 	};
 }
 
@@ -137,10 +141,15 @@ export async function runHealTestSweep(
 	for (const event of historicalEvents) {
 		const res = await runAgainstEventEphemeral(sourceTs, event, workflow);
 		const detail: HealTestResultDetail = { eventId: event.id, ok: res.ok };
-		if (!res.ok && res.error) detail.error = res.error;
+		if (!res.ok && res.error) {
+			detail.error = res.error;
+		}
 		details.push(detail);
-		if (res.ok) passed += 1;
-		else failed += 1;
+		if (res.ok) {
+			passed += 1;
+		} else {
+			failed += 1;
+		}
 		if (failed >= EARLY_OUT_FAIL_THRESHOLD) {
 			abortedEarly = true;
 			break;
@@ -148,13 +157,13 @@ export async function runHealTestSweep(
 	}
 
 	return {
+		abortedEarly,
 		results: {
-			total: historicalEvents.length,
-			passed,
+			details,
 			failed,
-			details
-		},
-		abortedEarly
+			passed,
+			total: historicalEvents.length
+		}
 	};
 }
 
@@ -186,45 +195,45 @@ export async function deployHealedVersion(args: {
 	const deployPath = await writeVersion(workflowId, nextVersionNumber, sourceTs);
 
 	const version = await createVersion({
-		workflowId,
-		sourceTs,
-		deployPath,
 		createdBy: 'heal',
-		parentVersionId: prevCurrent.id,
+		deployPath,
 		healedFromRunId: triggeringRunId,
-		setAsCurrent: true
+		parentVersionId: prevCurrent.id,
+		setAsCurrent: true,
+		sourceTs,
+		workflowId
 	});
 
 	// Pass undefined for agentTranscript so finishHealSession's UPDATE will
-	// null the column. The transcript was already written by the agent step
-	// via updateHealSessionTranscript and we don't want to drop it.
-	// finishHealSession serializes `null` when transcript is undefined, so
-	// we read+pass it explicitly to preserve it.
+	// Null the column. The transcript was already written by the agent step
+	// Via updateHealSessionTranscript and we don't want to drop it.
+	// FinishHealSession serializes `null` when transcript is undefined, so
+	// We read+pass it explicitly to preserve it.
 	const session = await getHealSessionAgentTranscript(healSessionId);
 
 	await finishHealSession(healSessionId, {
-		status: 'success',
 		agentTranscript: session,
-		testResults: sweep,
 		diff,
-		newVersionId: version.id
+		newVersionId: version.id,
+		status: 'success',
+		testResults: sweep
 	});
 
 	let replay: ReplayResult | null = null;
 	try {
 		replay = await replayFailedEvents(workflowId);
-	} catch (err) {
+	} catch (error) {
 		console.error('healer.deployHealedVersion: replayFailedEvents threw', {
-			workflowId,
-			error: err instanceof Error ? err.message : String(err)
+			error: error instanceof Error ? error.message : String(error),
+			workflowId
 		});
 	}
 
 	return {
-		newVersionId: version.id,
-		versionNumber: nextVersionNumber,
 		deployPath,
-		replay
+		newVersionId: version.id,
+		replay,
+		versionNumber: nextVersionNumber
 	};
 }
 
