@@ -636,7 +636,13 @@
 						</div>
 					{/if}
 				</div>
-				<pre class="code"><code>{selectedVersion.sourceTs}</code></pre>
+				<div class="code">
+					{#if data.selectedVersionSourceHtml}
+						{@html data.selectedVersionSourceHtml}
+					{:else}
+						<pre><code>{selectedVersion.sourceTs}</code></pre>
+					{/if}
+				</div>
 			{:else}
 				<div class="muted small">No version available.</div>
 			{/if}
@@ -1030,6 +1036,18 @@
 	.code {
 		max-height: 560px;
 		overflow: auto;
+		border-radius: 4px;
+	}
+	.code :global(pre) {
+		padding: 10px 12px;
+		margin: 0;
+		font-size: 12px;
+		white-space: pre;
+		tab-size: 2;
+		border-radius: 4px;
+	}
+	.code :global(pre code) {
+		font-family: inherit;
 	}
 	@media (max-width: 900px) {
 		.grid,
