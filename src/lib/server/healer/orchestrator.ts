@@ -61,7 +61,7 @@ export function computeDiff(oldSource: string, newSource: string): string {
 
 	// LCS table
 	const dp: number[][] = Array.from({ length: m + 1 }, () =>
-		Array.from<number>({ length: n + 1 }, () => 0)
+		Array.from({ length: n + 1 }, () => 0)
 	);
 	for (let i = m - 1; i >= 0; i--) {
 		for (let j = n - 1; j >= 0; j--) {
