@@ -32,5 +32,12 @@ name = "runely-heal"
 binding = "HEAL_WORKFLOW"
 class_name = "HealWorkflowFlow"
 
+# Cloudflare Email Sending. No-op until a verified sender domain exists
+# (EMAIL_FROM secret) and that domain's DNS is on Cloudflare. The binding
+# is safe to declare with no domain yet — send() throws, and auth.ts logs
+# the magic link to wrangler tail as a fallback.
+[[send_email]]
+name = "EMAIL"
+
 [triggers]
 crons = ["* * * * *"]
