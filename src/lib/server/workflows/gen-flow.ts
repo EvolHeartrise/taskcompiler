@@ -23,11 +23,12 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 		step: WorkflowStep
 	): Promise<GenWorkflowResult> {
 		const params = event.payload;
-		return withEnv(this.env, async () =>
-			step.do(
-				'generate',
-				{ retries: { limit: 1, delay: '5 seconds' }, timeout: '5 minutes' },
-				async () => {
+		const env = this.env;
+		return step.do(
+			'generate',
+			{ retries: { limit: 1, delay: '5 seconds' }, timeout: '5 minutes' },
+			async () =>
+				withEnv(env, async () => {
 					const out = await generateWorkflow({
 						name: params.name,
 						prompt: params.prompt,
@@ -40,8 +41,7 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 						versionId: out.versionId,
 						sourceTs: out.sourceTs
 					};
-				}
-			)
+				})
 		);
 	}
 }

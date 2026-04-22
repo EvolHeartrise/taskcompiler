@@ -5,7 +5,7 @@ import {
 	type AgentRunResult,
 	type Tool
 } from '../index.ts';
-import { createWorkflow } from '$lib/server/db/queries/workflows';
+import { createWorkflow, getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
 import type { TriggerType } from '$lib/server/db/types';
@@ -222,23 +222,32 @@ export async function generateWorkflow(
 	});
 
 	if (!emitState.emitted) {
+		const errorEvents = result.transcript
+			.filter((e): e is Extract<AgentEvent, { type: 'error' }> => e.type === 'error')
+			.map((e) => e.error);
+		const errorDetail =
+			errorEvents.length > 0 ? ` Errors: ${errorEvents.join(' | ').slice(0, 800)}` : '';
 		throw new Error(
 			`Agent did not emit a workflow (stopReason=${result.stopReason}). ` +
-				`Last message: ${result.finalMessage.slice(0, 500)}`
+				`Last message: ${result.finalMessage.slice(0, 500)}${errorDetail}`
 		);
 	}
 
 	const sourceTs = emitState.emitted.sourceTs;
 
-	// M4 restores cron firing via Cloudflare Cron Triggers. For now, cron/both
-	// workflows are created and stored but cron events are not fired.
-	const workflow = await createWorkflow({
-		id: opts.workflowIdOverride,
-		name: opts.name,
-		prompt: opts.prompt,
-		triggerType: opts.triggerType,
-		cronExpr: opts.cronExpr ?? null
-	});
+	// If the caller pre-inserted the workflow row (UI form action does this so
+	// /w/[id] can render while generation is pending), reuse it. Otherwise
+	// create the row now.
+	let workflow = opts.workflowIdOverride ? await getWorkflow(opts.workflowIdOverride) : null;
+	if (!workflow) {
+		workflow = await createWorkflow({
+			id: opts.workflowIdOverride,
+			name: opts.name,
+			prompt: opts.prompt,
+			triggerType: opts.triggerType,
+			cronExpr: opts.cronExpr ?? null
+		});
+	}
 
 	const deployPath = await writeVersion(workflow.id, 1, sourceTs);
 
