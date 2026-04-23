@@ -31,6 +31,7 @@ interface InvokePayload {
 		triggerType: 'webhook' | 'cron' | 'manual' | 'replay';
 		receivedAt: number;
 		payload: unknown;
+		headers: Record<string, string>;
 	};
 }
 
