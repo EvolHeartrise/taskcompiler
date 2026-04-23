@@ -132,7 +132,20 @@
 	}
 
 	const triggerResult = $derived(form?.trigger);
-	const replayResult = $derived(form?.replay);
+	const resumeResult = $derived(form?.resume);
+
+	const UNHEALABLE_LABELS: Record<string, string> = {
+		third_party_outage: 'Third-party outage',
+		credential: 'Credential issue',
+		input_malformed: 'Malformed input',
+		capability_gap: 'Capability gap',
+		other: 'Other'
+	};
+
+	function unhealableLabel(cat: string | null): string {
+		if (!cat) return 'Needs attention';
+		return UNHEALABLE_LABELS[cat] ?? cat;
+	}
 </script>
 
 <div class="head">
@@ -171,6 +184,46 @@
 		</a>
 	{/each}
 </nav>
+
+{#if data.needsAttention}
+	<div class="needs-attention">
+		<div class="na-head">
+			<span class="na-title">Workflow paused — needs your attention</span>
+			<span class="na-cat">{unhealableLabel(data.needsAttention.unhealableCategory)}</span>
+		</div>
+		{#if data.needsAttention.unhealableReason}
+			<p class="na-reason">{data.needsAttention.unhealableReason}</p>
+		{/if}
+		<p class="na-hint">
+			The heal agent decided this isn't fixable by changing the workflow code. Resolve the
+			underlying issue (rotate a secret, wait out the outage, or edit the workflow prompt) and then
+			click <b>Resume</b> to retry the {data.stats.totalFailed} failed event{data.stats
+				.totalFailed === 1
+				? ''
+				: 's'}.
+		</p>
+		<form
+			method="POST"
+			action="?/resume"
+			use:enhance={() => {
+				return async ({ update }) => {
+					await update({ reset: false });
+				};
+			}}
+		>
+			<button class="btn primary" type="submit">Resume and retry failed events</button>
+		</form>
+		{#if resumeResult}
+			{#if 'ok' in resumeResult && resumeResult.ok}
+				<div class="result ok">
+					Resolved. Attempted: {resumeResult.attempted} · OK: {resumeResult.okCount} · Failed: {resumeResult.failedCount}
+				</div>
+			{:else if 'error' in resumeResult}
+				<div class="alert">{resumeResult.error}</div>
+			{/if}
+		{/if}
+	</div>
+{/if}
 
 {#if activeTab === 'overview'}
 	{#if genInFlight}
@@ -269,38 +322,6 @@
 					</div>
 				{:else if 'error' in triggerResult}
 					<div class="alert">{triggerResult.error}</div>
-				{/if}
-			{/if}
-		</div>
-
-		<div class="card">
-			<h2>Replay failed events</h2>
-			<p class="muted small">
-				Re-executes every failed event through the current version. Successful replays are counted
-				as new OK runs, and the original failures are marked superseded.
-			</p>
-			<form
-				method="POST"
-				action="?/replay"
-				use:enhance={() => {
-					return async ({ update }) => {
-						await update({ reset: false });
-					};
-				}}
-			>
-				<button class="btn" type="submit" disabled={data.stats.totalFailed === 0}>
-					Replay {data.stats.totalFailed} failed run{data.stats.totalFailed === 1 ? '' : 's'}
-				</button>
-			</form>
-			{#if replayResult}
-				{#if 'ok' in replayResult && replayResult.ok}
-					<div class="result ok">
-						<div>
-							Attempted: {replayResult.attempted} · OK: {replayResult.okCount} · Failed: {replayResult.failedCount}
-						</div>
-					</div>
-				{:else if 'error' in replayResult}
-					<div class="alert">{replayResult.error}</div>
 				{/if}
 			{/if}
 		</div>
@@ -517,6 +538,9 @@
 									{/if}
 									{#if h.newVersionId}
 										· new version
+									{/if}
+									{#if h.status === 'needs_attention' && h.unhealableCategory}
+										· <span class="chip small">{unhealableLabel(h.unhealableCategory)}</span>
 									{/if}
 								</div>
 							</button>
@@ -980,9 +1004,51 @@
 		color: #92400e;
 	}
 	.badge.superseded,
-	.badge.abandoned {
+	.badge.abandoned,
+	.badge.resolved {
 		background: #e5e7eb;
 		color: #4b5563;
+	}
+	.badge.needs_attention {
+		background: #fef3c7;
+		color: #92400e;
+	}
+
+	.needs-attention {
+		background: #fffbeb;
+		border: 1px solid #fcd34d;
+		border-left: 4px solid #f59e0b;
+		border-radius: 8px;
+		padding: 14px 16px;
+		margin-bottom: 16px;
+	}
+	.needs-attention .na-head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 6px;
+	}
+	.needs-attention .na-title {
+		font-weight: 700;
+		color: #92400e;
+		font-size: 15px;
+	}
+	.needs-attention .na-cat {
+		background: #fde68a;
+		color: #78350f;
+		padding: 2px 8px;
+		border-radius: 999px;
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.needs-attention .na-reason {
+		margin: 4px 0 8px;
+		color: #78350f;
+	}
+	.needs-attention .na-hint {
+		margin: 0 0 10px;
+		color: #78350f;
+		font-size: 13px;
 	}
 	.mono {
 		font-family: ui-monospace, monospace;

@@ -1,8 +1,23 @@
 export type TriggerType = 'webhook' | 'cron' | 'both';
 export type EventTriggerType = 'webhook' | 'cron' | 'manual' | 'replay';
 export type RunStatus = 'running' | 'ok' | 'failed' | 'superseded';
-export type HealStatus = 'running' | 'success' | 'failed' | 'abandoned';
+export type HealStatus =
+	| 'running'
+	| 'success'
+	| 'failed'
+	| 'abandoned'
+	| 'needs_attention'
+	| 'resolved';
 export type VersionCreatedBy = 'user' | 'heal';
+
+export type RunErrorCategory = 'user_code' | 'infra' | 'unknown';
+
+export type UnhealableCategory =
+	| 'third_party_outage'
+	| 'credential'
+	| 'input_malformed'
+	| 'capability_gap'
+	| 'other';
 
 export interface Workflow {
 	id: string;
@@ -42,6 +57,7 @@ export interface RunError {
 	name: string;
 	message: string;
 	stack?: string;
+	category?: RunErrorCategory;
 }
 
 export interface RunLogEntry {
@@ -97,6 +113,9 @@ export interface HealSession {
 	testResults: HealTestResults | null;
 	newVersionId: string | null;
 	agentTranscript: HealAgentTranscriptEntry[] | null;
+	unhealableCategory: UnhealableCategory | null;
+	unhealableReason: string | null;
+	resolvedAt: number | null;
 }
 
 export interface WorkflowStateEntry {
@@ -104,4 +123,15 @@ export interface WorkflowStateEntry {
 	key: string;
 	value: unknown;
 	updatedAt: number;
+}
+
+export interface UserSecretMeta {
+	userId: string;
+	name: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export interface UserSecret extends UserSecretMeta {
+	value: string;
 }

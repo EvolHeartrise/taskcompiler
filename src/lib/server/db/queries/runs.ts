@@ -1,5 +1,5 @@
-import { getDb, now, uuid } from "../index.ts";
-import type { Run, RunError, RunLogEntry, RunStatus } from "../types.ts";
+import { getDb, now, uuid } from '../index.ts';
+import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
 
 interface RunRow {
 	id: string;
@@ -17,24 +17,26 @@ interface RunRow {
 }
 
 function parseJson<T>(s: string | null): T | null {
-	if (s === null) return null;
+	if (s === null) {
+		return null;
+	}
 	return JSON.parse(s) as T;
 }
 
 function rowToRun(row: RunRow): Run {
 	return {
-		id: row.id,
-		eventId: row.event_id,
-		workflowId: row.workflow_id,
-		versionId: row.version_id,
-		startedAt: row.started_at,
-		finishedAt: row.finished_at,
-		status: row.status,
 		error: parseJson<RunError>(row.error_json),
-		result: row.result_json === null ? null : (JSON.parse(row.result_json) as unknown),
-		logs: parseJson<RunLogEntry[]>(row.logs_json),
+		eventId: row.event_id,
+		finishedAt: row.finished_at,
+		id: row.id,
 		isReplay: row.is_replay !== 0,
+		logs: parseJson<RunLogEntry[]>(row.logs_json),
 		parentRunId: row.parent_run_id,
+		result: row.result_json === null ? null : (JSON.parse(row.result_json) as unknown),
+		startedAt: row.started_at,
+		status: row.status,
+		versionId: row.version_id,
+		workflowId: row.workflow_id
 	};
 }
 
@@ -53,7 +55,7 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
 		.prepare(
 			`INSERT INTO runs
 			 (id, event_id, workflow_id, version_id, started_at, finished_at, status, error_json, result_json, logs_json, is_replay, parent_run_id)
-			 VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, ?, ?)`
 		)
 		.bind(
 			id,
@@ -62,32 +64,26 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
 			input.versionId,
 			startedAt,
 			input.isReplay ? 1 : 0,
-			input.parentRunId ?? null,
+			input.parentRunId ?? null
 		)
 		.run();
-	const row = await getDb()
-		.prepare(`SELECT * FROM runs WHERE id = ?`)
-		.bind(id)
-		.first<RunRow>();
-	if (!row) throw new Error(`createRun: row missing after insert (id=${id})`);
+	const row = await getDb().prepare(`SELECT * FROM runs WHERE id = ?`).bind(id).first<RunRow>();
+	if (!row) {
+		throw new Error(`createRun: row missing after insert (id=${id})`);
+	}
 	return rowToRun(row);
 }
 
 export async function finishRunOk(
 	runId: string,
 	result: unknown,
-	logs: RunLogEntry[] | null,
+	logs: RunLogEntry[] | null
 ): Promise<Run | null> {
 	await getDb()
 		.prepare(
-			`UPDATE runs SET status = 'ok', finished_at = ?, result_json = ?, logs_json = ? WHERE id = ?`,
+			`UPDATE runs SET status = 'ok', finished_at = ?, result_json = ?, logs_json = ? WHERE id = ?`
 		)
-		.bind(
-			now(),
-			JSON.stringify(result ?? null),
-			logs ? JSON.stringify(logs) : null,
-			runId,
-		)
+		.bind(now(), JSON.stringify(result ?? null), logs ? JSON.stringify(logs) : null, runId)
 		.run();
 	return getRun(runId);
 }
@@ -95,11 +91,11 @@ export async function finishRunOk(
 export async function finishRunFailed(
 	runId: string,
 	error: RunError,
-	logs: RunLogEntry[] | null,
+	logs: RunLogEntry[] | null
 ): Promise<Run | null> {
 	await getDb()
 		.prepare(
-			`UPDATE runs SET status = 'failed', finished_at = ?, error_json = ?, logs_json = ? WHERE id = ?`,
+			`UPDATE runs SET status = 'failed', finished_at = ?, error_json = ?, logs_json = ? WHERE id = ?`
 		)
 		.bind(now(), JSON.stringify(error), logs ? JSON.stringify(logs) : null, runId)
 		.run();
@@ -115,10 +111,7 @@ export async function markRunSuperseded(runId: string): Promise<Run | null> {
 }
 
 export async function getRun(id: string): Promise<Run | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM runs WHERE id = ?`)
-		.bind(id)
-		.first<RunRow>();
+	const row = await getDb().prepare(`SELECT * FROM runs WHERE id = ?`).bind(id).first<RunRow>();
 	return row ? rowToRun(row) : null;
 }
 
@@ -133,7 +126,7 @@ export async function listRunsForWorkflow(workflowId: string): Promise<Run[]> {
 export async function listFailedRunsForWorkflow(workflowId: string): Promise<Run[]> {
 	const res = await getDb()
 		.prepare(
-			`SELECT * FROM runs WHERE workflow_id = ? AND status = 'failed' ORDER BY started_at DESC`,
+			`SELECT * FROM runs WHERE workflow_id = ? AND status = 'failed' ORDER BY started_at DESC`
 		)
 		.bind(workflowId)
 		.all<RunRow>();
@@ -153,7 +146,7 @@ export async function listFailedRunsByEvent(workflowId: string): Promise<Run[]> 
 			   ON latest_per_event.event_id = r.event_id
 			   AND latest_per_event.latest = r.started_at
 			 WHERE r.workflow_id = ? AND r.status = 'failed'
-			 ORDER BY r.started_at DESC`,
+			 ORDER BY r.started_at DESC`
 		)
 		.bind(workflowId, workflowId)
 		.all<RunRow>();

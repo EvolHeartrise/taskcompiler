@@ -1,4 +1,4 @@
-import { getEnv } from "$lib/server/env";
+import { getEnv } from '$lib/server/env';
 
 export function getDb() {
 	return getEnv().DB;

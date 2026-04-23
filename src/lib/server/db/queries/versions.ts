@@ -1,5 +1,5 @@
-import { getDb, now, uuid } from "../index.ts";
-import type { VersionCreatedBy, WorkflowVersion } from "../types.ts";
+import { getDb, now, uuid } from '../index.ts';
+import type { VersionCreatedBy, WorkflowVersion } from '../types.ts';
 
 interface WorkflowVersionRow {
 	id: string;
@@ -15,15 +15,15 @@ interface WorkflowVersionRow {
 
 function rowToVersion(row: WorkflowVersionRow): WorkflowVersion {
 	return {
-		id: row.id,
-		workflowId: row.workflow_id,
-		version: row.version,
-		sourceTs: row.source_ts,
-		deployPath: row.deploy_path,
 		createdAt: row.created_at,
 		createdBy: row.created_by,
-		parentVersionId: row.parent_version_id,
+		deployPath: row.deploy_path,
 		healedFromRunId: row.healed_from_run_id,
+		id: row.id,
+		parentVersionId: row.parent_version_id,
+		sourceTs: row.source_ts,
+		version: row.version,
+		workflowId: row.workflow_id
 	};
 }
 
@@ -44,7 +44,7 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 
 	const maxRow = await db
 		.prepare(
-			`SELECT COALESCE(MAX(version), 0) AS max_version FROM workflow_versions WHERE workflow_id = ?`,
+			`SELECT COALESCE(MAX(version), 0) AS max_version FROM workflow_versions WHERE workflow_id = ?`
 		)
 		.bind(input.workflowId)
 		.first<{ max_version: number }>();
@@ -54,7 +54,7 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 		.prepare(
 			`INSERT INTO workflow_versions
 			 (id, workflow_id, version, source_ts, deploy_path, created_at, created_by, parent_version_id, healed_from_run_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			id,
@@ -65,7 +65,7 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 			ts,
 			input.createdBy,
 			input.parentVersionId ?? null,
-			input.healedFromRunId ?? null,
+			input.healedFromRunId ?? null
 		);
 
 	if (input.setAsCurrent) {
@@ -81,7 +81,9 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 		.prepare(`SELECT * FROM workflow_versions WHERE id = ?`)
 		.bind(id)
 		.first<WorkflowVersionRow>();
-	if (!saved) throw new Error(`createVersion: row missing after insert (id=${id})`);
+	if (!saved) {
+		throw new Error(`createVersion: row missing after insert (id=${id})`);
+	}
 	return rowToVersion(saved);
 }
 
@@ -93,14 +95,12 @@ export async function getVersion(id: string): Promise<WorkflowVersion | null> {
 	return row ? rowToVersion(row) : null;
 }
 
-export async function getCurrentVersion(
-	workflowId: string,
-): Promise<WorkflowVersion | null> {
+export async function getCurrentVersion(workflowId: string): Promise<WorkflowVersion | null> {
 	const row = await getDb()
 		.prepare(
 			`SELECT v.* FROM workflow_versions v
 			 JOIN workflows w ON w.current_version_id = v.id
-			 WHERE w.id = ?`,
+			 WHERE w.id = ?`
 		)
 		.bind(workflowId)
 		.first<WorkflowVersionRow>();

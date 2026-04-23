@@ -1,10 +1,11 @@
 import {
-	DEFAULT_MODEL,
-	runAgent,
 	type AgentEvent,
 	type AgentRunResult,
-	type Tool
+	DEFAULT_MODEL,
+	type Tool,
+	runAgent
 } from '../index.ts';
+import { listSecretNamesForUser } from '$lib/server/db/queries/secrets';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
@@ -78,44 +79,52 @@ const TWO_ARG_RE =
 
 function validateSource(source: string): { ok: true } | { ok: false; error: string } {
 	if (typeof source !== 'string' || source.trim().length === 0) {
-		return { ok: false, error: 'source_ts is empty' };
+		return { error: 'source_ts is empty', ok: false };
 	}
 	if (!source.includes('export default')) {
 		return {
-			ok: false,
-			error: 'source must contain a default export (missing `export default`)'
+			error: 'source must contain a default export (missing `export default`)',
+			ok: false
 		};
 	}
 	if (!EXPORT_DEFAULT_RE.test(source)) {
 		return {
-			ok: false,
 			error:
-				'default export must be an async function or arrow function. Expected `export default async function run(event, ctx) { ... }` or `export default async (event, ctx) => { ... }`'
+				'default export must be an async function or arrow function. Expected `export default async function run(event, ctx) { ... }` or `export default async (event, ctx) => { ... }`',
+			ok: false
 		};
 	}
 	if (!TWO_ARG_RE.test(source)) {
 		return {
-			ok: false,
 			error:
-				'default export must accept two parameters (event, ctx). Got a signature with fewer parameters.'
+				'default export must accept two parameters (event, ctx). Got a signature with fewer parameters.',
+			ok: false
 		};
 	}
 	return { ok: true };
 }
 
-function buildUserMessage(opts: GenerateWorkflowOptions): string {
+function buildUserMessage(opts: GenerateWorkflowOptions, secretNames: string[]): string {
 	const trigger = formatTrigger(opts.triggerType, opts.cronExpr ?? null);
-	return [
+	const lines = [
 		`Workflow name: ${opts.name}`,
 		`Trigger: ${trigger}`,
 		'',
+		'## Available secrets (via ctx.secret)',
+		secretNames.length === 0
+			? '(none yet — if the workflow needs one, use `ctx.secret("NAME")` anyway and the user will add it before the workflow runs)'
+			: secretNames.map((n) => `- ${n}`).join('\n'),
+		'',
 		'User prompt:',
 		opts.prompt
-	].join('\n');
+	];
+	return lines.join('\n');
 }
 
 function formatTrigger(triggerType: TriggerType, cronExpr: string | null): string {
-	if (triggerType === 'webhook') return 'webhook';
+	if (triggerType === 'webhook') {
+		return 'webhook';
+	}
 	if (triggerType === 'cron') {
 		return cronExpr ? `cron (${cronExpr})` : 'cron';
 	}
@@ -131,25 +140,25 @@ function makeEmitTool(
 	maxAttempts: number
 ): Tool {
 	return {
-		name: 'emit_workflow',
 		description:
 			'Deliver the generated workflow. Call this EXACTLY ONCE with the full TypeScript module source and a one-sentence summary. This is the only way to finish the task.',
 		inputSchema: {
-			type: 'object',
+			additionalProperties: false,
 			properties: {
 				source_ts: {
-					type: 'string',
 					description:
-						'Full TypeScript source of the workflow module. Must export a default async function `run(event, ctx)`.'
+						'Full TypeScript source of the workflow module. Must export a default async function `run(event, ctx)`.',
+					type: 'string'
 				},
 				summary: {
-					type: 'string',
-					description: 'One-sentence summary of what the workflow does.'
+					description: 'One-sentence summary of what the workflow does.',
+					type: 'string'
 				}
 			},
 			required: ['source_ts', 'summary'],
-			additionalProperties: false
+			type: 'object'
 		},
+		name: 'emit_workflow',
 		async run(input: unknown): Promise<string> {
 			if (input === null || typeof input !== 'object') {
 				throw new Error('emit_workflow: expected an object input');
@@ -193,32 +202,45 @@ export async function generateWorkflow(
 	const controller = new AbortController();
 
 	// Wrap the emit tool so that on a successful emit, we capture the payload
-	// and abort the agent loop to return promptly.
+	// And abort the agent loop to return promptly.
 	const rawEmitTool = makeEmitTool(emitState, maxEmitAttempts);
 	const emitTool: Tool = {
 		...rawEmitTool,
 		async run(input, ctx) {
 			try {
 				return await rawEmitTool.run(input, ctx);
-			} catch (err) {
-				if (err instanceof EmitSuccess) {
+			} catch (error) {
+				if (error instanceof EmitSuccess) {
 					controller.abort();
-					return `ok: workflow received (${err.payload.summary})`;
+					return `ok: workflow received (${error.payload.summary})`;
 				}
-				throw err;
+				throw error;
 			}
 		}
 	};
 
-	const userMessage = buildUserMessage(opts);
+	// The /new form action pre-inserts the workflow row so /w/[id] can render
+	// While generation is pending. The id is passed in via workflowIdOverride.
+	if (!opts.workflowIdOverride) {
+		throw new Error('generateWorkflow: workflowIdOverride is required (caller must pre-insert)');
+	}
+	const preWorkflow = await getWorkflow(opts.workflowIdOverride);
+	if (!preWorkflow) {
+		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
+	}
+	const secretMetas = await listSecretNamesForUser(preWorkflow.userId);
+	const userMessage = buildUserMessage(
+		opts,
+		secretMetas.map((s) => s.name)
+	);
 
 	const result = await runAgent({
+		abortSignal: controller.signal,
 		model: opts.model ?? DEFAULT_MODEL,
-		systemPrompt: GEN_SYSTEM_PROMPT,
-		userMessage,
-		tools: [emitTool],
 		onEvent: opts.onEvent,
-		abortSignal: controller.signal
+		systemPrompt: GEN_SYSTEM_PROMPT,
+		tools: [emitTool],
+		userMessage
 	});
 
 	if (!emitState.emitted) {
@@ -233,33 +255,24 @@ export async function generateWorkflow(
 		);
 	}
 
-	const sourceTs = emitState.emitted.sourceTs;
-
-	// The /new form action pre-inserts the workflow row so /w/[id] can render
-	// while generation is pending. The id is passed in via workflowIdOverride.
-	if (!opts.workflowIdOverride) {
-		throw new Error('generateWorkflow: workflowIdOverride is required (caller must pre-insert)');
-	}
-	const workflow = await getWorkflow(opts.workflowIdOverride);
-	if (!workflow) {
-		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
-	}
+	const { sourceTs } = emitState.emitted;
+	const workflow = preWorkflow;
 
 	const deployPath = await writeVersion(workflow.id, 1, sourceTs);
 
 	const version = await createVersion({
-		workflowId: workflow.id,
-		sourceTs,
-		deployPath,
 		createdBy: 'user',
-		setAsCurrent: true
+		deployPath,
+		setAsCurrent: true,
+		sourceTs,
+		workflowId: workflow.id
 	});
 
 	return {
-		workflowId: workflow.id,
-		versionId: version.id,
 		sourceTs,
+		stopReason: result.stopReason,
 		transcript: result.transcript,
-		stopReason: result.stopReason
+		versionId: version.id,
+		workflowId: workflow.id
 	};
 }

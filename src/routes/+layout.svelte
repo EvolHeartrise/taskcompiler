@@ -17,6 +17,7 @@
 	let currentWorkflowId = $derived(page.params.workflowId ?? null);
 	let isOnHome = $derived(page.url.pathname === '/');
 	let isOnNew = $derived(page.url.pathname.startsWith('/new'));
+	let isOnSecrets = $derived(page.url.pathname.startsWith('/settings/secrets'));
 </script>
 
 <svelte:head>
@@ -36,6 +37,9 @@
 				<nav class="primary" aria-label="Primary">
 					<a href={resolve('/')} class="nav-link" class:active={isOnHome}>Workflows</a>
 					<a href={resolve('/new')} class="nav-link new" class:active={isOnNew}>+ New workflow</a>
+					<a href={resolve('/settings/secrets')} class="nav-link" class:active={isOnSecrets}>
+						Secrets
+					</a>
 				</nav>
 
 				{#if data.workflows.length > 0}
