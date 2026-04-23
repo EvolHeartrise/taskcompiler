@@ -134,13 +134,6 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 	};
 };
 
-async function assertOwnership(workflowId: string, projectId: string): Promise<void> {
-	const wf = await getWorkflowForProject(workflowId, projectId);
-	if (!wf) {
-		error(404, 'Workflow not found');
-	}
-}
-
 export const actions: Actions = {
 	delete: async ({ params, request }) => {
 		const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
@@ -168,7 +161,10 @@ export const actions: Actions = {
 	},
 
 	resume: async ({ params }) => {
-		await assertOwnership(params.workflowId, params.projectId);
+		const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
+		if (!workflow) {
+			error(404, 'Workflow not found');
+		}
 		try {
 			const session = await getOpenNeedsAttentionSession(params.workflowId);
 			if (!session) {
@@ -192,7 +188,10 @@ export const actions: Actions = {
 	},
 
 	trigger: async ({ params, request }) => {
-		await assertOwnership(params.workflowId, params.projectId);
+		const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
+		if (!workflow) {
+			error(404, 'Workflow not found');
+		}
 
 		const data = await request.formData();
 		const raw = (data.get('payload') ?? '').toString();
