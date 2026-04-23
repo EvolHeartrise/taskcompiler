@@ -899,6 +899,17 @@
 		margin-bottom: 6px;
 		color: #374151;
 	}
+	.delete-dialog .field > span code {
+		display: inline-block;
+		padding: 1px 6px;
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		border-radius: 4px;
+		color: #991b1b;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 12.5px;
+		font-weight: 600;
+	}
 	.delete-dialog input[type='text'] {
 		width: 100%;
 		padding: 9px 11px;
