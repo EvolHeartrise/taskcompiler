@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import type { TriggerType, Workflow } from '../types.ts';
+import type { TriggerType, Workflow, WorkflowStatus } from '../types.ts';
 
 interface WorkflowRow {
 	id: string;
@@ -9,6 +9,9 @@ interface WorkflowRow {
 	current_version_id: string | null;
 	trigger_type: TriggerType;
 	cron_expr: string | null;
+	status: WorkflowStatus;
+	inferred_event_type_ts: string | null;
+	inferred_at: number | null;
 	created_at: number;
 	updated_at: number;
 	last_fired_at: number;
@@ -20,10 +23,13 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
 		cronExpr: row.cron_expr,
 		currentVersionId: row.current_version_id,
 		id: row.id,
+		inferredAt: row.inferred_at,
+		inferredEventTypeTs: row.inferred_event_type_ts,
 		lastFiredAt: row.last_fired_at,
 		name: row.name,
 		projectId: row.project_id,
 		prompt: row.prompt,
+		status: row.status,
 		triggerType: row.trigger_type,
 		updatedAt: row.updated_at
 	};
@@ -36,15 +42,18 @@ export interface CreateWorkflowInput {
 	prompt: string;
 	triggerType: TriggerType;
 	cronExpr?: string | null;
+	status?: WorkflowStatus;
 }
 
 export async function createWorkflow(input: CreateWorkflowInput): Promise<Workflow> {
 	const id = input.id ?? uuid();
 	const ts = now();
+	const status: WorkflowStatus =
+		input.status ?? (input.triggerType === 'webhook' ? 'awaiting_first_event' : 'generating');
 	await getDb()
 		.prepare(
-			`INSERT INTO workflows (id, project_id, name, prompt, current_version_id, trigger_type, cron_expr, created_at, updated_at, last_fired_at)
-			 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, 0)`
+			`INSERT INTO workflows (id, project_id, name, prompt, current_version_id, trigger_type, cron_expr, status, inferred_event_type_ts, inferred_at, created_at, updated_at, last_fired_at)
+			 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, NULL, NULL, ?, ?, 0)`
 		)
 		.bind(
 			id,
@@ -53,6 +62,7 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 			input.prompt,
 			input.triggerType,
 			input.cronExpr ?? null,
+			status,
 			ts,
 			ts
 		)
@@ -101,6 +111,7 @@ export interface UpdateWorkflowInput {
 	cronExpr?: string | null;
 	currentVersionId?: string | null;
 	triggerType?: TriggerType;
+	status?: WorkflowStatus;
 }
 
 export async function updateWorkflow(
@@ -117,18 +128,40 @@ export async function updateWorkflow(
 		currentVersionId:
 			patch.currentVersionId === undefined ? existing.currentVersionId : patch.currentVersionId,
 		name: patch.name ?? existing.name,
+		status: patch.status ?? existing.status,
 		triggerType: patch.triggerType ?? existing.triggerType,
 		updatedAt: now()
 	};
 	await getDb()
 		.prepare(
 			`UPDATE workflows
-			 SET name = ?, cron_expr = ?, current_version_id = ?, trigger_type = ?, updated_at = ?
+			 SET name = ?, cron_expr = ?, current_version_id = ?, trigger_type = ?, status = ?, updated_at = ?
 			 WHERE id = ?`
 		)
-		.bind(next.name, next.cronExpr, next.currentVersionId, next.triggerType, next.updatedAt, id)
+		.bind(
+			next.name,
+			next.cronExpr,
+			next.currentVersionId,
+			next.triggerType,
+			next.status,
+			next.updatedAt,
+			id
+		)
 		.run();
 	return next;
+}
+
+export async function setInferredEventType(
+	workflowId: string,
+	typeTs: string | null
+): Promise<void> {
+	const ts = typeTs === null ? null : now();
+	await getDb()
+		.prepare(
+			`UPDATE workflows SET inferred_event_type_ts = ?, inferred_at = ?, updated_at = ? WHERE id = ?`
+		)
+		.bind(typeTs, ts, now(), workflowId)
+		.run();
 }
 
 export async function deleteWorkflow(id: string): Promise<boolean> {
@@ -151,6 +184,7 @@ export async function deleteWorkflow(id: string): Promise<boolean> {
 		db.prepare(`DELETE FROM heal_sessions WHERE workflow_id = ?`).bind(id),
 		db.prepare(`DELETE FROM runs WHERE workflow_id = ?`).bind(id),
 		db.prepare(`DELETE FROM workflow_versions WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM event_shapes WHERE workflow_id = ?`).bind(id),
 		db.prepare(`DELETE FROM events WHERE workflow_id = ?`).bind(id),
 		db.prepare(`DELETE FROM workflow_state WHERE workflow_id = ?`).bind(id),
 		db.prepare(`DELETE FROM workflows WHERE id = ?`).bind(id)
