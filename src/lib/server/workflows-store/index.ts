@@ -47,10 +47,6 @@ export async function writeVersion(
 	return scriptName;
 }
 
-export async function deleteWorkflowVersion(scriptName: string): Promise<void> {
-	await deleteWorkflow(scriptName);
-}
-
 export interface TearDownResult {
 	scriptsDeleted: number;
 	scriptsFailed: number;

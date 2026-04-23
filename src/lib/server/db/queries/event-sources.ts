@@ -85,32 +85,6 @@ export async function listCronEventSources(): Promise<EventSource[]> {
 	return res.results.map(rowToEventSource);
 }
 
-export interface UpdateEventSourceInput {
-	name?: string;
-	cronExpr?: string | null;
-}
-
-export async function updateEventSource(
-	id: string,
-	patch: UpdateEventSourceInput
-): Promise<EventSource | null> {
-	const existing = await getEventSource(id);
-	if (!existing) {
-		return null;
-	}
-	const next: EventSource = {
-		...existing,
-		cronExpr: patch.cronExpr === undefined ? existing.cronExpr : patch.cronExpr,
-		name: patch.name ?? existing.name,
-		updatedAt: now()
-	};
-	await getDb()
-		.prepare(`UPDATE event_sources SET name = ?, cron_expr = ?, updated_at = ? WHERE id = ?`)
-		.bind(next.name, next.cronExpr, next.updatedAt, id)
-		.run();
-	return next;
-}
-
 export async function markEventSourceFired(sourceId: string, ts: number): Promise<void> {
 	await getDb()
 		.prepare(`UPDATE event_sources SET last_fired_at = ? WHERE id = ?`)

@@ -136,20 +136,9 @@ export interface HealSession {
 	resolvedAt: number | null;
 }
 
-export interface WorkflowStateEntry {
-	workflowId: string;
-	key: string;
-	value: unknown;
-	updatedAt: number;
-}
-
 export interface ProjectSecretMeta {
 	projectId: string;
 	name: string;
 	createdAt: number;
 	updatedAt: number;
-}
-
-export interface ProjectSecret extends ProjectSecretMeta {
-	value: string;
 }
