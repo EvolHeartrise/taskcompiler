@@ -3,7 +3,7 @@ import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion, getCurrentVersion } from '$lib/server/db/queries/versions';
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
-import { finishHealSession, getHealSession } from '$lib/server/db/queries/heals';
+import { finishHealSession, getHealSession } from '$lib/server/db/queries/heal-sessions';
 import { writeVersion } from '$lib/server/workflows-store';
 import type { AgentEvent } from '$lib/server/agent';
 import type {

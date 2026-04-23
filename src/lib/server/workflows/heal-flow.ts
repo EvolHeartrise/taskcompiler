@@ -11,7 +11,7 @@ import {
 	createHealSession,
 	finishHealSession,
 	updateHealSessionTranscript
-} from '$lib/server/db/queries/heals';
+} from '$lib/server/db/queries/heal-sessions';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import type { HealTestResults, UnhealableCategory } from '$lib/server/db/types';
 

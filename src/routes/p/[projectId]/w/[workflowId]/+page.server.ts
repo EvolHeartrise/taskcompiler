@@ -10,7 +10,7 @@ import {
 	getOpenNeedsAttentionSession,
 	listHealSessionsForWorkflow,
 	markHealSessionResolved
-} from '$lib/server/db/queries/heals';
+} from '$lib/server/db/queries/heal-sessions';
 import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { highlightTs } from '$lib/server/highlight';
