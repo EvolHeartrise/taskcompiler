@@ -63,13 +63,15 @@
 				<input
 					name="name"
 					type="text"
-					bind:value={newName}
+					value={newName}
+					oninput={(e) => (newName = e.currentTarget.value.toUpperCase())}
 					placeholder="SLACK_WEBHOOK"
 					autocomplete="off"
+					autocapitalize="characters"
 					spellcheck="false"
 					required
 				/>
-				<span class="hint">A–Z, 0–9, underscores. Input is auto-uppercased on save.</span>
+				<span class="hint">A–Z, 0–9, underscores.</span>
 			</label>
 			<label class="field grow">
 				<span>Value</span>
