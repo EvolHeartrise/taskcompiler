@@ -89,24 +89,54 @@ function classifyInfraFailure(name: string, message: string): RunError {
 	return { category: 'infra', message, name };
 }
 
+type AttemptResult<T> = { done: true; value: T } | { done: false; reason: string; value?: T };
+
+// Generic exponential backoff (3^i). `attempt` returns done:true to stop or
+// done:false to retry. After maxAttempts, returns the last attempt's result.
+async function retryWithBackoff<T>(
+	label: string,
+	maxAttempts: number,
+	baseDelayMs: number,
+	attempt: () => Promise<AttemptResult<T>>
+): Promise<AttemptResult<T>> {
+	let last: AttemptResult<T> = { done: false, reason: 'no attempts ran' };
+	for (let i = 0; i < maxAttempts; i++) {
+		last = await attempt();
+		if (last.done) {
+			return last;
+		}
+		if (i < maxAttempts - 1) {
+			const delay = baseDelayMs * 3 ** i;
+			console.warn(
+				`[executor] ${label} attempt ${i + 1}/${maxAttempts} failed, retrying in ${delay}ms`,
+				{ reason: last.reason }
+			);
+			await sleep(delay);
+		}
+	}
+	return last;
+}
+
 async function withDbRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
 	let lastErr: unknown;
-	for (let i = 0; i < DB_MAX_ATTEMPTS; i++) {
-		try {
-			return await fn();
-		} catch (error) {
-			lastErr = error;
-			if (i < DB_MAX_ATTEMPTS - 1) {
-				const delay = DB_BASE_DELAY_MS * 3 ** i;
-				console.warn(
-					`[executor] D1 transient error on ${label} (attempt ${i + 1}), retrying in ${delay}ms`,
-					{
-						error: error instanceof Error ? error.message : String(error)
-					}
-				);
-				await sleep(delay);
+	const result = await retryWithBackoff<T>(
+		`db:${label}`,
+		DB_MAX_ATTEMPTS,
+		DB_BASE_DELAY_MS,
+		async () => {
+			try {
+				return { done: true, value: await fn() };
+			} catch (error) {
+				lastErr = error;
+				return {
+					done: false,
+					reason: error instanceof Error ? error.message : String(error)
+				};
 			}
 		}
+	);
+	if (result.done) {
+		return result.value;
 	}
 	throw lastErr;
 }
@@ -186,23 +216,19 @@ async function dispatchWithRetry(args: {
 		headers: Record<string, string>;
 	};
 }): Promise<DispatchOutcome> {
-	let last: DispatchOutcome | null = null;
-	for (let i = 0; i < DISPATCH_MAX_ATTEMPTS; i++) {
-		const outcome = await dispatchOnce(args);
-		if (outcome.kind !== 'infra_error') {
-			return outcome;
+	const result = await retryWithBackoff<DispatchOutcome>(
+		'dispatch',
+		DISPATCH_MAX_ATTEMPTS,
+		DISPATCH_BASE_DELAY_MS,
+		async () => {
+			const outcome = await dispatchOnce(args);
+			if (outcome.kind !== 'infra_error') {
+				return { done: true, value: outcome };
+			}
+			return { done: false, reason: outcome.error.message, value: outcome };
 		}
-		last = outcome;
-		if (i < DISPATCH_MAX_ATTEMPTS - 1) {
-			const delay = DISPATCH_BASE_DELAY_MS * 3 ** i;
-			console.warn(
-				`[executor] dispatch infra error (attempt ${i + 1}/${DISPATCH_MAX_ATTEMPTS}), retrying in ${delay}ms`,
-				{ error: outcome.error.message }
-			);
-			await sleep(delay);
-		}
-	}
-	return last!;
+	);
+	return result.done ? result.value : result.value!;
 }
 
 // Capture an event on an event source and fan out to every workflow attached
