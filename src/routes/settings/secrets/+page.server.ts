@@ -6,7 +6,6 @@ import {
 	listSecretNamesForUser,
 	upsertSecret
 } from '$lib/server/db/queries/secrets';
-import { redeployUserCurrentVersions } from '$lib/server/workflows-store';
 
 export const load: PageServerLoad = async ({ locals }) => {
 	if (!locals.user) {
@@ -18,7 +17,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 
 export const actions: Actions = {
 	delete: async ({ request, locals }) => {
-		if (!locals.user) error(401, 'unauthorized');
+		if (!locals.user) {
+			error(401, 'unauthorized');
+		}
 		const userId = locals.user.id;
 		const data = await request.formData();
 		const name = (data.get('name') ?? '').toString().trim();
@@ -27,29 +28,17 @@ export const actions: Actions = {
 		}
 		try {
 			await deleteSecret(userId, name);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { delete: { error: msg } });
 		}
-
-		let redeployStats: { attempted: number; ok: number; failed: number } | null = null;
-		try {
-			redeployStats = await redeployUserCurrentVersions(userId);
-		} catch (err) {
-			console.error('[secrets] redeploy on delete failed', err);
-		}
-
-		return {
-			delete: {
-				ok: true,
-				name,
-				redeploy: redeployStats
-			}
-		};
+		return { delete: { name, ok: true } };
 	},
 
 	upsert: async ({ request, locals }) => {
-		if (!locals.user) error(401, 'unauthorized');
+		if (!locals.user) {
+			error(401, 'unauthorized');
+		}
 		const userId = locals.user.id;
 		const data = await request.formData();
 		const rawName = (data.get('name') ?? '').toString().trim();
@@ -73,24 +62,10 @@ export const actions: Actions = {
 
 		try {
 			await upsertSecret(userId, name, value);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { upsert: { error: msg } });
 		}
-
-		let redeployStats: { attempted: number; ok: number; failed: number } | null = null;
-		try {
-			redeployStats = await redeployUserCurrentVersions(userId);
-		} catch (err) {
-			console.error('[secrets] redeploy on upsert failed', err);
-		}
-
-		return {
-			upsert: {
-				ok: true,
-				name,
-				redeploy: redeployStats
-			}
-		};
+		return { upsert: { name, ok: true } };
 	}
 };

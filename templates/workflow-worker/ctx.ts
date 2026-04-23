@@ -1,11 +1,17 @@
-interface D1Result {
+interface D1StateRow {
 	value_json: string;
+}
+
+interface D1SecretRow {
+	name: string;
+	value: string;
 }
 
 interface D1PreparedStatement {
 	bind: (...values: unknown[]) => D1PreparedStatement;
 	first: <T = unknown>() => Promise<T | null>;
 	run: () => Promise<unknown>;
+	all: <T = unknown>() => Promise<{ results: T[] }>;
 }
 
 interface D1Database {
@@ -14,6 +20,7 @@ interface D1Database {
 
 export interface WorkflowEnv {
 	DB: D1Database;
+	USER_ID: string;
 	[key: string]: unknown;
 }
 
@@ -90,7 +97,29 @@ function headerHas(init: RequestInit | undefined, name: string): boolean {
 	return Object.keys(h as Record<string, string>).some((k) => k.toLowerCase() === needle);
 }
 
-export function buildCtx(env: WorkflowEnv, body: InvokePayload, logs: LogEntry[]): Ctx {
+/**
+ * Pull the current user's secrets fresh per invocation. One D1 query per
+ * workflow execution; `ctx.secret()` reads from the returned Map.
+ * Rotating a secret in the UI takes effect on the very next invocation —
+ * no redeploy needed.
+ */
+export async function loadSecrets(env: WorkflowEnv): Promise<Map<string, string>> {
+	const res = await env.DB.prepare(`SELECT name, value FROM user_secrets WHERE user_id = ?`)
+		.bind(env.USER_ID)
+		.all<D1SecretRow>();
+	const map = new Map<string, string>();
+	for (const row of res.results) {
+		map.set(row.name, row.value);
+	}
+	return map;
+}
+
+export function buildCtx(
+	env: WorkflowEnv,
+	body: InvokePayload,
+	logs: LogEntry[],
+	secrets: Map<string, string>
+): Ctx {
 	const workflowId = body.workflow.id;
 
 	const log: Ctx['log'] = (level, message, data) => {
@@ -155,7 +184,7 @@ export function buildCtx(env: WorkflowEnv, body: InvokePayload, logs: LogEntry[]
 			`SELECT value_json FROM workflow_state WHERE workflow_id = ? AND key = ?`
 		)
 			.bind(workflowId, key)
-			.first<D1Result>();
+			.first<D1StateRow>();
 		if (!row) {
 			return undefined;
 		}
@@ -185,7 +214,7 @@ export function buildCtx(env: WorkflowEnv, body: InvokePayload, logs: LogEntry[]
 		},
 		log,
 		secret: (name: string): string => {
-			const v = env[name];
+			const v = secrets.get(name);
 			if (typeof v !== 'string' || v === '') {
 				throw new Error(`Secret not set: ${name}`);
 			}
