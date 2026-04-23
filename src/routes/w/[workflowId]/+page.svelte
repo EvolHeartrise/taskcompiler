@@ -137,6 +137,24 @@
 
 	let deleteConfirmName = $state('');
 	let canDelete = $derived(deleteConfirmName === data.workflow.name);
+	let deleteDialog: HTMLDialogElement | undefined = $state();
+
+	function openDeleteDialog() {
+		deleteConfirmName = '';
+		deleteDialog?.showModal();
+	}
+
+	function closeDeleteDialog() {
+		deleteDialog?.close();
+	}
+
+	// If the server action returns an error, the dialog was already closed by
+	// SvelteKit's default form behavior. Re-open it so the user sees the error.
+	$effect(() => {
+		if (deleteResult && 'error' in deleteResult) {
+			deleteDialog?.showModal();
+		}
+	});
 
 	const UNHEALABLE_LABELS: Record<string, string> = {
 		third_party_outage: 'Third-party outage',
@@ -332,41 +350,52 @@
 	</section>
 
 	<section class="danger-zone">
-		<div class="card danger">
-			<h2>Danger zone</h2>
-			<p class="muted small">
-				Permanently delete this workflow and everything it owns — every version, every deployed
-				worker script, all events, runs, and heal sessions. This cannot be undone.
-			</p>
-			<form
-				method="POST"
-				action="?/delete"
-				use:enhance={() => {
-					return async ({ update }) => {
-						await update({ reset: false });
-					};
-				}}
-			>
-				<label class="field">
-					<span>Type <code>{data.workflow.name}</code> to confirm</span>
-					<input
-						name="confirm_name"
-						type="text"
-						bind:value={deleteConfirmName}
-						autocomplete="off"
-						spellcheck="false"
-					/>
-				</label>
-				<button class="btn danger" type="submit" disabled={!canDelete}>
-					Delete this workflow
-				</button>
-			</form>
-			{#if deleteResult && 'error' in deleteResult}
-				<div class="alert">{deleteResult.error}</div>
-			{/if}
+		<div class="danger-row">
+			<div>
+				<div class="danger-title">Delete this workflow</div>
+				<div class="muted small">
+					Removes every version, deployed worker script, event, run, and heal session.
+				</div>
+			</div>
+			<button type="button" class="btn danger" onclick={openDeleteDialog}>Delete workflow</button>
 		</div>
 	</section>
 {/if}
+
+<dialog bind:this={deleteDialog} class="delete-dialog" onclose={() => (deleteConfirmName = '')}>
+	<form
+		method="POST"
+		action="?/delete"
+		use:enhance={() => {
+			return async ({ update }) => {
+				await update({ reset: false });
+			};
+		}}
+	>
+		<h2>Delete workflow</h2>
+		<p>
+			Permanently delete <b>{data.workflow.name}</b> and everything it owns — every version, every deployed
+			worker script, all events, runs, and heal sessions. This cannot be undone.
+		</p>
+		<label class="field">
+			<span>Type <code>{data.workflow.name}</code> to confirm</span>
+			<input
+				name="confirm_name"
+				type="text"
+				bind:value={deleteConfirmName}
+				autocomplete="off"
+				spellcheck="false"
+			/>
+		</label>
+		{#if deleteResult && 'error' in deleteResult}
+			<div class="alert">{deleteResult.error}</div>
+		{/if}
+		<div class="dialog-actions">
+			<button type="button" class="btn" onclick={closeDeleteDialog}>Cancel</button>
+			<button type="submit" class="btn danger" disabled={!canDelete}>Delete workflow</button>
+		</div>
+	</form>
+</dialog>
 
 {#if activeTab === 'events'}
 	<section class="split">
@@ -807,38 +836,91 @@
 		gap: 16px;
 	}
 	.danger-zone {
-		margin-top: 20px;
+		margin-top: 24px;
+		padding-top: 16px;
+		border-top: 1px solid #f1f5f9;
 	}
-	.card.danger {
-		border-color: #fecaca;
+	.danger-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
 	}
-	.card.danger h2 {
+	.danger-title {
+		font-weight: 600;
+		color: #374151;
+		margin-bottom: 2px;
+	}
+	.btn.danger {
+		background: #fff;
+		border-color: #fca5a5;
 		color: #991b1b;
 	}
-	.card.danger form {
-		margin-top: 10px;
+	.btn.danger:hover:not(:disabled) {
+		background: #fef2f2;
 	}
-	.card.danger input[type='text'] {
+	.btn.danger:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.delete-dialog {
+		border: none;
+		border-radius: 10px;
+		padding: 0;
+		max-width: 480px;
+		width: calc(100% - 32px);
+		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+	}
+	.delete-dialog::backdrop {
+		background: rgba(15, 23, 42, 0.5);
+	}
+	.delete-dialog form {
+		padding: 22px 24px;
+	}
+	.delete-dialog h2 {
+		margin: 0 0 8px;
+		font-size: 18px;
+		color: #111;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.delete-dialog p {
+		margin: 0 0 16px;
+		color: #374151;
+		font-size: 13.5px;
+	}
+	.delete-dialog .field {
+		margin-bottom: 12px;
+	}
+	.delete-dialog .field > span {
+		display: block;
+		font-size: 13px;
+		margin-bottom: 6px;
+		color: #374151;
+	}
+	.delete-dialog input[type='text'] {
 		width: 100%;
-		padding: 8px 10px;
+		padding: 9px 11px;
 		border: 1px solid #d1d5db;
 		border-radius: 6px;
 		font: inherit;
 		font-family: ui-monospace, monospace;
 	}
-	.btn.danger {
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 6px;
+	}
+	.dialog-actions .btn.danger:not(:disabled) {
 		background: #dc2626;
 		border-color: #dc2626;
 		color: #fff;
 	}
-	.btn.danger:hover:not(:disabled) {
+	.dialog-actions .btn.danger:not(:disabled):hover {
 		background: #991b1b;
 		border-color: #991b1b;
-	}
-	.btn.danger:disabled {
-		background: #fca5a5;
-		border-color: #fca5a5;
-		cursor: not-allowed;
 	}
 	.split {
 		display: grid;
