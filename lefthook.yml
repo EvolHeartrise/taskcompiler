@@ -10,7 +10,7 @@ pre-commit:
       stage_fixed: true
     oxlint:
       glob: '*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}'
-      run: bunx oxlint --fix {staged_files}
+      run: bunx oxlint --fix --max-warnings 0 {staged_files}
       stage_fixed: true
     prettier:
       glob: '*.{svelte,json,md,css,html,yml,yaml}'

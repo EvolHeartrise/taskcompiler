@@ -8,6 +8,8 @@ export function withEnv<T>(env: Env, fn: () => Promise<T>): Promise<T> {
 
 export function getEnv(): Env {
 	const s = store.getStore();
-	if (!s) throw new Error('getEnv() called outside request context');
+	if (!s) {
+		throw new Error('getEnv() called outside request context');
+	}
 	return s.env;
 }

@@ -4,10 +4,17 @@
 		"correctness": "error",
 		"suspicious": "error",
 		"perf": "warn",
-		"style": "warn",
-		"pedantic": "warn",
+		"style": "off",
+		"pedantic": "off",
 		"restriction": "off",
 		"nursery": "off"
+	},
+	"rules": {
+		"prefer-const": "error",
+		"curly": "error",
+		"no-shadow": "error",
+		"no-await-in-loop": "off",
+		"no-map-spread": "off"
 	},
 	"env": {
 		"browser": true,
@@ -21,6 +28,7 @@
 		"dist",
 		"node_modules",
 		"static",
+		"**/*.svelte",
 		"worker-configuration.d.ts",
 		"src/lib/server/wfp/templates.generated.ts"
 	]

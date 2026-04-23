@@ -81,31 +81,32 @@ Generated workflows are single TypeScript files:
 
 ```ts
 export default async function run(event: unknown, ctx: Ctx): Promise<unknown> {
-  // validate event shape, throw on mismatch
-  // use ctx.* for side effects
-  // return a JSON-serializable value (or void)
+	// validate event shape, throw on mismatch
+	// use ctx.* for side effects
+	// return a JSON-serializable value (or void)
 }
 ```
 
 ### `ctx` surface (the full capability set)
 
-| Property | Type | Notes |
-|---|---|---|
-| `ctx.workflow` | `{ id, name }` | metadata |
-| `ctx.event` | `{ id, triggerType, receivedAt }` | current event metadata |
-| `ctx.http.fetch(input, init?)` | `Promise<Response>` | logged |
-| `ctx.http.get(url, init?)` | `Promise<Response>` | logged |
-| `ctx.http.post(url, body?, init?)` | `Promise<Response>` | auto-JSON-encodes plain objects |
-| `ctx.log(level, message, data?)` | `void` | persisted with the run |
-| `ctx.state.get<T>(key)` | `Promise<T \| undefined>` | per-workflow kv in SQLite |
-| `ctx.state.set(key, value)` | `Promise<void>` | JSON-serializable values |
-| `ctx.secret(name)` | `string` | reads `process.env[name]`; throws if unset |
+| Property                           | Type                              | Notes                                      |
+| ---------------------------------- | --------------------------------- | ------------------------------------------ |
+| `ctx.workflow`                     | `{ id, name }`                    | metadata                                   |
+| `ctx.event`                        | `{ id, triggerType, receivedAt }` | current event metadata                     |
+| `ctx.http.fetch(input, init?)`     | `Promise<Response>`               | logged                                     |
+| `ctx.http.get(url, init?)`         | `Promise<Response>`               | logged                                     |
+| `ctx.http.post(url, body?, init?)` | `Promise<Response>`               | auto-JSON-encodes plain objects            |
+| `ctx.log(level, message, data?)`   | `void`                            | persisted with the run                     |
+| `ctx.state.get<T>(key)`            | `Promise<T \| undefined>`         | per-workflow kv in SQLite                  |
+| `ctx.state.set(key, value)`        | `Promise<void>`                   | JSON-serializable values                   |
+| `ctx.secret(name)`                 | `string`                          | reads `process.env[name]`; throws if unset |
 
 Workflows may NOT import from `node_modules` or from other files. Everything comes through `ctx`.
 
 ## Triggers
 
 ### Webhook
+
 Each workflow has an endpoint:
 
 ```
@@ -116,6 +117,7 @@ GET  /hook/<workflowId>   # query params become event.payload
 The endpoint returns `200` with `{ eventId, runId, status, result?, error? }` whether the run succeeded or failed. This is intentional — the event is persisted either way, and failed runs will be healed and replayed.
 
 ### Cron
+
 Set `triggerType` to `cron` or `both` and provide a cron expression (e.g. `0 9 * * *`). The scheduler runs in-process and re-reads the workflow row on each fire, so edits to the schedule take effect automatically.
 
 ## Self-healing loop
@@ -159,9 +161,9 @@ The gate is the orchestrator's sweep, not the agent's self-test — the agent ma
 
 The agent gets the `ctx` reference above as context, so prompts should focus on intent and event shape:
 
-> *Good.* "When a webhook arrives with `{ repo: string, pr_number: number, action: 'opened' | 'closed' }`, and `action === 'opened'`, post a message to Slack via `ctx.secret('SLACK_WEBHOOK_URL')` with the PR link `https://github.com/${repo}/pull/${pr_number}`. Log the outcome."
+> _Good._ "When a webhook arrives with `{ repo: string, pr_number: number, action: 'opened' | 'closed' }`, and `action === 'opened'`, post a message to Slack via `ctx.secret('SLACK_WEBHOOK_URL')` with the PR link `https://github.com/${repo}/pull/${pr_number}`. Log the outcome."
 
-> *Bad.* "Slack me when a PR opens."  (ambiguous event shape, no secret specified)
+> _Bad._ "Slack me when a PR opens." (ambiguous event shape, no secret specified)
 
 ## File layout
 
@@ -199,11 +201,11 @@ bun run smoke:live        # requires OPENROUTER_API_KEY
 
 ## Environment
 
-| Var | Required | Default | Purpose |
-|---|---|---|---|
-| `OPENROUTER_API_KEY` | for gen + heal | — | OpenRouter bearer token |
-| `RUNELY_DATA_DIR` | no | `./data` | sqlite db + workflow source files |
-| `RUNELY_SECRET_*` / any env var | per-workflow | — | exposed to workflows via `ctx.secret(name)` |
+| Var                             | Required       | Default  | Purpose                                     |
+| ------------------------------- | -------------- | -------- | ------------------------------------------- |
+| `OPENROUTER_API_KEY`            | for gen + heal | —        | OpenRouter bearer token                     |
+| `RUNELY_DATA_DIR`               | no             | `./data` | sqlite db + workflow source files           |
+| `RUNELY_SECRET_*` / any env var | per-workflow   | —        | exposed to workflows via `ctx.secret(name)` |
 
 ## Known limitations / deliberately-deferred
 

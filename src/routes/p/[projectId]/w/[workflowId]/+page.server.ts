@@ -160,8 +160,8 @@ export const actions: Actions = {
 
 		try {
 			await tearDownWorkflow(workflow.id);
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			return fail(500, { delete: { error: `Delete failed: ${msg}` } });
 		}
 		redirect(303, `/p/${params.projectId}`);
@@ -185,8 +185,8 @@ export const actions: Actions = {
 					sessionId: session.id
 				}
 			};
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			return fail(500, { resume: { error: msg } });
 		}
 	},
@@ -200,8 +200,8 @@ export const actions: Actions = {
 		let payload: unknown;
 		try {
 			payload = raw.trim() === '' ? {} : JSON.parse(raw);
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			return fail(400, { trigger: { error: `Invalid JSON: ${msg}` } });
 		}
 
@@ -220,8 +220,8 @@ export const actions: Actions = {
 					status: result.status
 				}
 			};
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			return fail(500, { trigger: { error: msg } });
 		}
 	}

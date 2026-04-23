@@ -12,7 +12,6 @@
 
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const here = import.meta.dirname;
 const root = path.resolve(here, '..');
