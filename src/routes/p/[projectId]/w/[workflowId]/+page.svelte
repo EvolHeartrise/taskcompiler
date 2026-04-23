@@ -16,7 +16,8 @@
 	let healInFlight = $derived(
 		data.inFlight.heal?.status === 'running' || data.inFlight.heal?.status === 'queued'
 	);
-	let anyInFlight = $derived(genInFlight || healInFlight);
+	let awaitingFirstEvent = $derived(data.workflow.status === 'awaiting_first_event');
+	let anyInFlight = $derived(genInFlight || healInFlight || awaitingFirstEvent);
 
 	$effect(() => {
 		if (!anyInFlight) return;
@@ -249,7 +250,15 @@
 {/if}
 
 {#if activeTab === 'overview'}
-	{#if genInFlight}
+	{#if awaitingFirstEvent}
+		<div class="banner banner-info">
+			<strong>Waiting for your first webhook event…</strong>
+			<span class="muted small">
+				Send any request to the webhook URL below. The first event's shape will be inferred and used
+				to type the generated workflow.
+			</span>
+		</div>
+	{:else if genInFlight}
 		<div class="banner banner-info">
 			<strong>Generating workflow…</strong>
 			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
@@ -303,6 +312,21 @@
 					Send a <code>POST</code> with a JSON body, or <code>GET</code> with query params.
 				</p>
 			</div>
+
+			{#if data.inferredEventTypeHtml}
+				<div class="card">
+					<h2>Inferred event type</h2>
+					<p class="muted small">
+						Built from {data.stats.totalEvents} historical event{data.stats.totalEvents === 1
+							? ''
+							: 's'}. Regenerated whenever a new shape arrives. The agent uses this as
+						<code>WorkflowEvent</code> when generating and healing.
+					</p>
+					<!-- Trusted HTML: shiki syntax-highlighter output, not user input. -->
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+					{@html data.inferredEventTypeHtml}
+				</div>
+			{/if}
 		{:else}
 			<div class="card">
 				<h2>Schedule</h2>

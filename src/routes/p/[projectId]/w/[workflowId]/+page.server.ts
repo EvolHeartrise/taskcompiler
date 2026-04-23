@@ -73,11 +73,16 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 		? await highlightTs(selectedVersion.sourceTs)
 		: null;
 
+	const inferredEventTypeHtml = workflow.inferredEventTypeTs
+		? await highlightTs(workflow.inferredEventTypeTs)
+		: null;
+
 	const inFlight: InFlightInfo = {};
 	if (platform) {
 		const { env } = platform;
 
-		if (workflow.currentVersionId === null) {
+		// Awaiting_first_event has no GEN_WORKFLOW instance yet — skip the lookup.
+		if (workflow.currentVersionId === null && workflow.status === 'generating') {
 			const gen = await fetchInstanceStatus(env.GEN_WORKFLOW, `gen-${workflow.id}`);
 			if (gen) {
 				inFlight.gen = gen;
@@ -103,6 +108,7 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 		failedRuns,
 		heals,
 		inFlight,
+		inferredEventTypeHtml,
 		needsAttention,
 		origin: url.origin,
 		runs,
