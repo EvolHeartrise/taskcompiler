@@ -5,7 +5,7 @@ import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
-import { typecheckWorkflow } from '$lib/server/typecheck/service';
+import { typecheckWorkflow } from '../typecheck/service';
 import type { TriggerType } from '$lib/server/db/types';
 
 export interface GenerateWorkflowOptions {

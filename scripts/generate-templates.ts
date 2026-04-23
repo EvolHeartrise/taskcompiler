@@ -6,8 +6,8 @@
 // (src/worker.ts) reaches the same source files outside the Vite bundle.
 // Inlining the strings into a plain TS module makes both bundlers happy.
 //
-// Also emits src/lib/server/typecheck/ts-lib.generated.ts, which bundles the
-// TypeScript compiler's lib.*.d.ts files as a string map so the agent-code
+// Also emits src/lib/server/agent/typecheck/ts-lib.generated.ts, which bundles
+// The TypeScript compiler's lib.*.d.ts files as a string map so the agent-code
 // Typecheck service can run in the Workers runtime (no filesystem).
 
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -52,7 +52,7 @@ process.stdout.write(`wrote ${path.relative(root, outFile)}\n`);
 // Bundle TypeScript lib.*.d.ts files. Workers has no filesystem, so the
 // Typecheck service serves these to the TS compiler via a virtual host.
 const tsLibDir = path.join(root, 'node_modules/typescript/lib');
-const libOutFile = path.join(root, 'src/lib/server/typecheck/ts-lib.generated.ts');
+const libOutFile = path.join(root, 'src/lib/server/agent/typecheck/ts-lib.generated.ts');
 const libEntries = readdirSync(tsLibDir)
 	.filter((f) => /^lib\..+\.d\.ts$/.test(f))
 	.toSorted();
