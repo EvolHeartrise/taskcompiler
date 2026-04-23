@@ -1,10 +1,5 @@
-import {
-	type AgentEvent,
-	type AgentRunResult,
-	DEFAULT_MODEL,
-	type Tool,
-	runAgent
-} from '../index.ts';
+import { type AgentEvent, type AgentRunResult, DEFAULT_MODEL, runAgent } from '../loop.ts';
+import type { Tool } from '../tools.ts';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/events';
