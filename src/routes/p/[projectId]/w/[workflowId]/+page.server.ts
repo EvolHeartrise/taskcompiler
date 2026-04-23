@@ -14,6 +14,7 @@ import {
 import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { highlightTs } from '$lib/server/highlight';
+import { getEnv } from '$lib/server/env';
 
 export interface InFlightStatus {
 	status: string;
@@ -45,7 +46,7 @@ async function fetchInstanceStatus(
 
 // Project ownership is enforced by /p/[projectId]/+layout.server.ts. We still
 // Scope the workflow lookup by project so /p/A/w/[id-of-B-workflow] 404s.
-export const load: PageServerLoad = async ({ params, url, platform }) => {
+export const load: PageServerLoad = async ({ params, url }) => {
 	const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
 	if (!workflow) {
 		error(404, 'Workflow not found');
@@ -88,26 +89,21 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 		: null;
 
 	const inFlight: InFlightInfo = {};
-	if (platform) {
-		const { env } = platform;
+	const env = getEnv();
 
-		if (workflow.currentVersionId === null) {
-			const gen = await fetchInstanceStatus(env.GEN_WORKFLOW, `gen-${workflow.id}`);
-			if (gen) {
-				inFlight.gen = gen;
-			}
+	if (workflow.currentVersionId === null) {
+		const gen = await fetchInstanceStatus(env.GEN_WORKFLOW, `gen-${workflow.id}`);
+		if (gen) {
+			inFlight.gen = gen;
 		}
+	}
 
-		const latestHeal = heals[0];
-		if (latestHeal && latestHeal.status === 'running') {
-			const heal = await fetchInstanceStatus(
-				env.HEAL_WORKFLOW,
-				`heal-${latestHeal.triggeringRunId}`
-			);
-			if (heal) {
-				inFlight.heal = heal;
-				inFlight.healSessionId = latestHeal.id;
-			}
+	const latestHeal = heals[0];
+	if (latestHeal && latestHeal.status === 'running') {
+		const heal = await fetchInstanceStatus(env.HEAL_WORKFLOW, `heal-${latestHeal.triggeringRunId}`);
+		if (heal) {
+			inFlight.heal = heal;
+			inFlight.healSessionId = latestHeal.id;
 		}
 	}
 

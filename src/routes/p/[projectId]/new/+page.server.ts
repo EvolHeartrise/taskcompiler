@@ -6,6 +6,7 @@ import {
 } from '$lib/server/db/queries/event-sources';
 import { countEventsForSource } from '$lib/server/db/queries/events';
 import { createWorkflow } from '$lib/server/db/queries/workflows';
+import { getEnv } from '$lib/server/env';
 
 // Workflow creation form. Requires an event source — either picked via
 // `?source=<id>` (from the source detail page / project home) or selected
@@ -66,10 +67,6 @@ export const actions: Actions = {
 			return fail(400, { error: 'Event source not found in this project.', values });
 		}
 
-		if (!event.platform) {
-			return fail(500, { error: 'Platform bindings unavailable.', values });
-		}
-
 		const workflowId = crypto.randomUUID();
 
 		try {
@@ -86,7 +83,7 @@ export const actions: Actions = {
 		}
 
 		try {
-			await event.platform.env.GEN_WORKFLOW.create({
+			await getEnv().GEN_WORKFLOW.create({
 				id: `gen-${workflowId}`,
 				params: {
 					backfill,
