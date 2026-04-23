@@ -8,6 +8,7 @@ import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunLogEntry, RunStatus } from '$lib/server/db/types';
 import { getEnv } from '$lib/server/env';
+import { classifyInfraFailure } from './run-error';
 
 export interface ExecuteSourceEventOptions {
 	eventSourceId: string;
@@ -83,10 +84,6 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
-}
-
-function classifyInfraFailure(name: string, message: string): RunError {
-	return { category: 'infra', message, name };
 }
 
 type AttemptResult<T> = { done: true; value: T } | { done: false; reason: string; value?: T };
