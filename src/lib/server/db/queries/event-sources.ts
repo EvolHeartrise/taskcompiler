@@ -27,22 +27,25 @@ export interface CreateEventSourceInput {
 export async function createEventSource(input: CreateEventSourceInput): Promise<EventSource> {
 	const id = input.id ?? uuid();
 	const ts = now();
+	const cronExpr = input.cronExpr ?? null;
 	await getDb()
 		.prepare(
 			`INSERT INTO event_sources
 			 (id, project_id, name, trigger_type, cron_expr, created_at, updated_at, last_fired_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, 0)`
 		)
-		.bind(id, input.projectId, input.name, input.triggerType, input.cronExpr ?? null, ts, ts)
+		.bind(id, input.projectId, input.name, input.triggerType, cronExpr, ts, ts)
 		.run();
-	const row = await getDb()
-		.prepare(`SELECT * FROM event_sources WHERE id = ?`)
-		.bind(id)
-		.first<EventSourceRow>();
-	if (!row) {
-		throw new Error(`createEventSource: row missing after insert (id=${id})`);
-	}
-	return rowToEventSource(row);
+	return {
+		createdAt: ts,
+		cronExpr,
+		id,
+		lastFiredAt: 0,
+		name: input.name,
+		projectId: input.projectId,
+		triggerType: input.triggerType,
+		updatedAt: ts
+	};
 }
 
 // System-level lookup (cron/webhook/executor). Does not enforce project_id —

@@ -35,6 +35,9 @@ export interface CreateEventInput {
 export async function createEvent(input: CreateEventInput): Promise<Event> {
 	const id = uuid();
 	const receivedAt = input.receivedAt ?? now();
+	const payload = input.payload ?? null;
+	const headers = input.headers ?? {};
+	const dedupKey = input.dedupKey ?? null;
 	await getDb()
 		.prepare(
 			`INSERT INTO events (id, event_source_id, trigger_type, payload_json, headers_json, received_at, dedup_key)
@@ -44,17 +47,21 @@ export async function createEvent(input: CreateEventInput): Promise<Event> {
 			id,
 			input.eventSourceId,
 			input.triggerType,
-			JSON.stringify(input.payload ?? null),
-			JSON.stringify(input.headers ?? {}),
+			JSON.stringify(payload),
+			JSON.stringify(headers),
 			receivedAt,
-			input.dedupKey ?? null
+			dedupKey
 		)
 		.run();
-	const row = await getDb().prepare(`SELECT * FROM events WHERE id = ?`).bind(id).first<EventRow>();
-	if (!row) {
-		throw new Error(`createEvent: row missing after insert (id=${id})`);
-	}
-	return rowToEvent(row);
+	return {
+		dedupKey,
+		eventSourceId: input.eventSourceId,
+		headers,
+		id,
+		payload,
+		receivedAt,
+		triggerType: input.triggerType
+	};
 }
 
 export async function getEvent(id: string): Promise<Event | null> {

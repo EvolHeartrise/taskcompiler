@@ -48,22 +48,30 @@ export interface CreateHealSessionInput {
 
 export async function createHealSession(input: CreateHealSessionInput): Promise<HealSession> {
 	const id = uuid();
+	const startedAt = now();
 	await getDb()
 		.prepare(
 			`INSERT INTO heal_sessions
 			 (id, workflow_id, triggering_run_id, started_at, finished_at, status, diff, test_results_json, new_version_id, agent_transcript_json, unhealable_category, unhealable_reason, resolved_at)
 			 VALUES (?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
 		)
-		.bind(id, input.workflowId, input.triggeringRunId, now())
+		.bind(id, input.workflowId, input.triggeringRunId, startedAt)
 		.run();
-	const row = await getDb()
-		.prepare(`SELECT * FROM heal_sessions WHERE id = ?`)
-		.bind(id)
-		.first<HealSessionRow>();
-	if (!row) {
-		throw new Error(`createHealSession: row missing after insert (id=${id})`);
-	}
-	return rowToHealSession(row);
+	return {
+		agentTranscript: null,
+		diff: null,
+		finishedAt: null,
+		id,
+		newVersionId: null,
+		resolvedAt: null,
+		startedAt,
+		status: 'running',
+		testResults: null,
+		triggeringRunId: input.triggeringRunId,
+		unhealableCategory: null,
+		unhealableReason: null,
+		workflowId: input.workflowId
+	};
 }
 
 export interface FinishHealSessionInput {
