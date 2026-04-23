@@ -5,10 +5,11 @@ import {
 	type Tool,
 	runAgent
 } from '../index.ts';
-import { listSecretNamesForUser } from '$lib/server/db/queries/secrets';
+import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
+import { typecheckWorkflow } from '$lib/server/typecheck/service';
 import type { TriggerType } from '$lib/server/db/types';
 
 export interface GenerateWorkflowOptions {
@@ -69,7 +70,9 @@ The module MUST:
 - No console.log. No try/catch around the whole function — let errors propagate.
 
 ## Delivery
-You must call the \`emit_workflow\` tool EXACTLY ONCE with the full module source plus a one-sentence summary. Do NOT write files via bash or any other tool — emit_workflow is the only way to deliver.`;
+You must call the \`emit_workflow\` tool EXACTLY ONCE with the full module source plus a one-sentence summary. Do NOT write files via bash or any other tool — emit_workflow is the only way to deliver.
+
+The emitted source is type-checked against the Ctx interface before it's accepted. The \`ctx.secret\` parameter is narrowed to the project's actual secret names (listed below), so a typo or an unknown name is a TS error. If emit_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_workflow again with the corrected source.`;
 
 const EXPORT_DEFAULT_RE =
 	/export\s+default\s+(async\s+function|function\s+\w*\s*\(|(async\s+)?\([^)]*\)\s*=>|(async\s+)?[A-Za-z_$][\w$]*\s*=>)/;
@@ -122,13 +125,10 @@ function buildUserMessage(opts: GenerateWorkflowOptions, secretNames: string[]):
 }
 
 function formatTrigger(triggerType: TriggerType, cronExpr: string | null): string {
-	if (triggerType === 'webhook') {
-		return 'webhook';
-	}
 	if (triggerType === 'cron') {
 		return cronExpr ? `cron (${cronExpr})` : 'cron';
 	}
-	return cronExpr ? `both — webhook and cron (${cronExpr})` : 'both — webhook and cron';
+	return 'webhook';
 }
 
 class EmitSuccess {
@@ -137,7 +137,8 @@ class EmitSuccess {
 
 function makeEmitTool(
 	state: { attempts: number; emitted: EmittedPayload | null },
-	maxAttempts: number
+	maxAttempts: number,
+	secretNames: readonly string[]
 ): Tool {
 	return {
 		description:
@@ -165,12 +166,12 @@ function makeEmitTool(
 			}
 			const obj = input as Record<string, unknown>;
 			const source = obj.source_ts;
-			const summary = obj.summary;
+			const { summary } = obj;
 			if (typeof source !== 'string') {
-				throw new Error('emit_workflow: `source_ts` must be a string');
+				throw new TypeError('emit_workflow: `source_ts` must be a string');
 			}
 			if (typeof summary !== 'string') {
-				throw new Error('emit_workflow: `summary` must be a string');
+				throw new TypeError('emit_workflow: `summary` must be a string');
 			}
 			state.attempts += 1;
 			const validation = validateSource(source);
@@ -180,11 +181,23 @@ function makeEmitTool(
 				}
 				throw new Error(`${validation.error}. Fix the source and call emit_workflow again.`);
 			}
+			const tc = typecheckWorkflow(secretNames, source);
+			if (!tc.ok) {
+				const details = tc.diagnostics.join('\n');
+				if (state.attempts >= maxAttempts) {
+					throw new Error(
+						`TypeScript errors in emitted source (max emit attempts (${maxAttempts}) exhausted):\n${details}`
+					);
+				}
+				throw new Error(
+					`TypeScript errors in emitted source. Fix them and call emit_workflow again:\n${details}`
+				);
+			}
 			state.emitted = { sourceTs: source, summary };
 			// Signal the loop to stop by throwing a sentinel the outer abort handler
-			// catches. But tools can't stop the loop directly — instead we rely on the
-			// assistant getting a success response and then issuing end_turn. Return
-			// a success message telling it the task is complete.
+			// Catches. But tools can't stop the loop directly — instead we rely on the
+			// Assistant getting a success response and then issuing end_turn. Return
+			// A success message telling it the task is complete.
 			throw new EmitSuccess(state.emitted);
 		}
 	};
@@ -201,9 +214,22 @@ export async function generateWorkflow(
 
 	const controller = new AbortController();
 
+	// The /new form action pre-inserts the workflow row so /w/[id] can render
+	// While generation is pending. The id is passed in via workflowIdOverride.
+	if (!opts.workflowIdOverride) {
+		throw new Error('generateWorkflow: workflowIdOverride is required (caller must pre-insert)');
+	}
+	const preWorkflow = await getWorkflow(opts.workflowIdOverride);
+	if (!preWorkflow) {
+		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
+	}
+	const secretMetas = await listSecretNamesForProject(preWorkflow.projectId);
+	const secretNames = secretMetas.map((s) => s.name);
+	const userMessage = buildUserMessage(opts, secretNames);
+
 	// Wrap the emit tool so that on a successful emit, we capture the payload
 	// And abort the agent loop to return promptly.
-	const rawEmitTool = makeEmitTool(emitState, maxEmitAttempts);
+	const rawEmitTool = makeEmitTool(emitState, maxEmitAttempts, secretNames);
 	const emitTool: Tool = {
 		...rawEmitTool,
 		async run(input, ctx) {
@@ -218,21 +244,6 @@ export async function generateWorkflow(
 			}
 		}
 	};
-
-	// The /new form action pre-inserts the workflow row so /w/[id] can render
-	// While generation is pending. The id is passed in via workflowIdOverride.
-	if (!opts.workflowIdOverride) {
-		throw new Error('generateWorkflow: workflowIdOverride is required (caller must pre-insert)');
-	}
-	const preWorkflow = await getWorkflow(opts.workflowIdOverride);
-	if (!preWorkflow) {
-		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
-	}
-	const secretMetas = await listSecretNamesForUser(preWorkflow.userId);
-	const userMessage = buildUserMessage(
-		opts,
-		secretMetas.map((s) => s.name)
-	);
 
 	const result = await runAgent({
 		abortSignal: controller.signal,

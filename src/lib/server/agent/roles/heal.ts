@@ -9,8 +9,9 @@ import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
-import { listSecretNamesForUser } from '$lib/server/db/queries/secrets';
+import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
+import { typecheckWorkflow } from '$lib/server/typecheck/service';
 import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
 
 export interface HealOptions {
@@ -111,7 +112,10 @@ Use one of these categories:
 
 If you're not sure, attempt a fix first. A wrong fix is usually cheaper than a wrong escalation — the user sees an escalation as "something is blocking my workflow" and acts on it.
 
-Do not emit partial or placeholder code. Call exactly ONE terminal tool (emit_fixed_workflow or emit_unhealable).`;
+Do not emit partial or placeholder code. Call exactly ONE terminal tool (emit_fixed_workflow or emit_unhealable).
+
+## Typecheck gate on emit_fixed_workflow
+The source you emit is type-checked against the Ctx interface. \`ctx.secret\` accepts only the project's current secret names (listed in the user message); a typo or unknown name is a TS error. If emit_fixed_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_fixed_workflow again.`;
 
 const EXPORT_DEFAULT_RE =
 	/export\s+default\s+(async\s+function|function\s+\w*\s*\(|(async\s+)?\([^)]*\)\s*=>|(async\s+)?[A-Za-z_$][\w$]*\s*=>)/;
@@ -298,11 +302,11 @@ function makeListEventsTool(workflowId: string): Tool {
 			const slice = all.slice(-Math.max(1, Math.floor(limit)));
 			const out = slice.map((e) => ({
 				id: e.id,
+				payloadPreview: previewPayload(e.payload, 200),
 				receivedAt: e.receivedAt,
-				triggerType: e.triggerType,
-				payloadPreview: previewPayload(e.payload, 200)
+				triggerType: e.triggerType
 			}));
-			return JSON.stringify({ total: all.length, returned: out.length, events: out });
+			return JSON.stringify({ events: out, returned: out.length, total: all.length });
 		}
 	};
 }
@@ -323,17 +327,21 @@ function makeGetEventTool(workflowId: string): Tool {
 		async run(input: unknown): Promise<string> {
 			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
 			const id = getStringProp(obj, 'id');
-			if (!id) throw new Error('get_event: `id` is required');
+			if (!id) {
+				throw new Error('get_event: `id` is required');
+			}
 			const event = await getEvent(id);
-			if (!event) throw new Error(`get_event: event not found: ${id}`);
+			if (!event) {
+				throw new Error(`get_event: event not found: ${id}`);
+			}
 			if (event.workflowId !== workflowId) {
 				throw new Error(`get_event: event does not belong to this workflow`);
 			}
 			return JSON.stringify({
 				id: event.id,
+				payload: event.payload,
 				receivedAt: event.receivedAt,
-				triggerType: event.triggerType,
-				payload: event.payload
+				triggerType: event.triggerType
 			});
 		}
 	};
@@ -360,12 +368,12 @@ function makeListFailedRunsTool(workflowId: string): Tool {
 			const all = await listFailedRunsForWorkflow(workflowId);
 			const slice = all.slice(0, Math.max(1, Math.floor(limit)));
 			const out = slice.map((r) => ({
-				runId: r.id,
+				error: r.error,
 				eventId: r.eventId,
-				startedAt: r.startedAt,
-				error: r.error
+				runId: r.id,
+				startedAt: r.startedAt
 			}));
-			return JSON.stringify({ total: all.length, returned: out.length, runs: out });
+			return JSON.stringify({ returned: out.length, runs: out, total: all.length });
 		}
 	};
 }
@@ -385,23 +393,27 @@ function makeGetRunTool(workflowId: string): Tool {
 		async run(input: unknown): Promise<string> {
 			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
 			const runId = getStringProp(obj, 'runId');
-			if (!runId) throw new Error('get_run: `runId` is required');
+			if (!runId) {
+				throw new Error('get_run: `runId` is required');
+			}
 			const run = await getRun(runId);
-			if (!run) throw new Error(`get_run: run not found: ${runId}`);
+			if (!run) {
+				throw new Error(`get_run: run not found: ${runId}`);
+			}
 			if (run.workflowId !== workflowId) {
 				throw new Error('get_run: run does not belong to this workflow');
 			}
 			return JSON.stringify({
-				id: run.id,
-				eventId: run.eventId,
-				versionId: run.versionId,
-				status: run.status,
-				startedAt: run.startedAt,
-				finishedAt: run.finishedAt,
 				error: run.error,
-				result: run.result,
+				eventId: run.eventId,
+				finishedAt: run.finishedAt,
+				id: run.id,
+				isReplay: run.isReplay,
 				logs: run.logs ?? [],
-				isReplay: run.isReplay
+				result: run.result,
+				startedAt: run.startedAt,
+				status: run.status,
+				versionId: run.versionId
 			});
 		}
 	};
@@ -428,22 +440,30 @@ function makeRunTestEventTool(workflowId: string): Tool {
 			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
 			const eventId = getStringProp(obj, 'event_id');
 			const sourceTs = getStringProp(obj, 'source_ts');
-			if (!eventId) throw new Error('run_test_event: `event_id` is required');
-			if (!sourceTs) throw new Error('run_test_event: `source_ts` is required');
+			if (!eventId) {
+				throw new Error('run_test_event: `event_id` is required');
+			}
+			if (!sourceTs) {
+				throw new Error('run_test_event: `source_ts` is required');
+			}
 			const event = await getEvent(eventId);
-			if (!event) throw new Error(`run_test_event: event not found: ${eventId}`);
+			if (!event) {
+				throw new Error(`run_test_event: event not found: ${eventId}`);
+			}
 			if (event.workflowId !== workflowId) {
 				throw new Error('run_test_event: event does not belong to this workflow');
 			}
 			const workflow = await getWorkflow(workflowId);
-			if (!workflow) throw new Error(`run_test_event: workflow not found: ${workflowId}`);
+			if (!workflow) {
+				throw new Error(`run_test_event: workflow not found: ${workflowId}`);
+			}
 			const res = await runAgainstEventEphemeral(sourceTs, event, workflow);
 			const tail = res.logs.slice(-20);
 			return JSON.stringify({
-				ok: res.ok,
-				error: res.error,
 				durationMs: res.durationMs,
-				logs_tail: tail
+				error: res.error,
+				logs_tail: tail,
+				ok: res.ok
 			});
 		}
 	};
@@ -451,7 +471,8 @@ function makeRunTestEventTool(workflowId: string): Tool {
 
 function makeEmitFixedWorkflowTool(
 	state: { attempts: number; emitted: EmittedPayload | null },
-	maxAttempts: number
+	maxAttempts: number,
+	secretNames: readonly string[]
 ): Tool {
 	return {
 		description:
@@ -479,7 +500,7 @@ function makeEmitFixedWorkflowTool(
 			}
 			const obj = input as Record<string, unknown>;
 			const source = obj.source_ts;
-			const summary = obj.summary;
+			const { summary } = obj;
 			if (typeof source !== 'string') {
 				throw new TypeError('emit_fixed_workflow: `source_ts` must be a string');
 			}
@@ -493,6 +514,18 @@ function makeEmitFixedWorkflowTool(
 					throw new Error(`${validation.error}. Max emit attempts (${maxAttempts}) exhausted.`);
 				}
 				throw new Error(`${validation.error}. Fix the source and call emit_fixed_workflow again.`);
+			}
+			const tc = typecheckWorkflow(secretNames, source);
+			if (!tc.ok) {
+				const details = tc.diagnostics.join('\n');
+				if (state.attempts >= maxAttempts) {
+					throw new Error(
+						`TypeScript errors in emitted source (max emit attempts (${maxAttempts}) exhausted):\n${details}`
+					);
+				}
+				throw new Error(
+					`TypeScript errors in emitted source. Fix them and call emit_fixed_workflow again:\n${details}`
+				);
 			}
 			state.emitted = { kind: 'fixed', sourceTs: source, summary };
 			throw new EmitSuccess(state.emitted);
@@ -527,8 +560,8 @@ function makeEmitUnhealableTool(state: { emitted: EmittedPayload | null }): Tool
 				throw new Error('emit_unhealable: expected an object input');
 			}
 			const obj = input as Record<string, unknown>;
-			const category = obj.category;
-			const reason = obj.reason;
+			const { category } = obj;
+			const { reason } = obj;
 			if (typeof category !== 'string') {
 				throw new TypeError('emit_unhealable: `category` must be a string');
 			}
@@ -541,8 +574,8 @@ function makeEmitUnhealableTool(state: { emitted: EmittedPayload | null }): Tool
 				throw new Error('emit_unhealable: `reason` must be a non-empty string');
 			}
 			state.emitted = {
-				kind: 'unhealable',
 				category: category as UnhealableCategory,
+				kind: 'unhealable',
 				reason: reason.trim()
 			};
 			throw new EmitSuccess(state.emitted);
@@ -574,10 +607,11 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	const triggeringRun = await getRun(opts.triggeringRunId);
 	const failedEvent = triggeringRun ? await getEvent(triggeringRun.eventId) : null;
 	const historicalEventCount = (await listAllEventsForWorkflow(opts.workflowId)).length;
-	const secretMetas = await listSecretNamesForUser(workflow.userId);
+	const secretMetas = await listSecretNamesForProject(workflow.projectId);
+	const secretNames = secretMetas.map((s) => s.name);
 
 	const userMessage = buildUserMessage({
-		availableSecrets: secretMetas.map((s) => s.name),
+		availableSecrets: secretNames,
 		currentSource,
 		failedEvent,
 		historicalEventCount,
@@ -621,7 +655,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		makeListFailedRunsTool(opts.workflowId),
 		makeGetRunTool(opts.workflowId),
 		makeRunTestEventTool(opts.workflowId),
-		wrapTerminal(makeEmitFixedWorkflowTool(emitState, 2)),
+		wrapTerminal(makeEmitFixedWorkflowTool(emitState, 2, secretNames)),
 		wrapTerminal(makeEmitUnhealableTool(emitState))
 	];
 
