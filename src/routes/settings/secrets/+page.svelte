@@ -65,7 +65,7 @@
 					type="text"
 					value={newName}
 					oninput={(e) => (newName = e.currentTarget.value.toUpperCase())}
-					placeholder="SLACK_WEBHOOK"
+					placeholder="SECRET_NAME"
 					autocomplete="off"
 					autocapitalize="characters"
 					spellcheck="false"
