@@ -6,9 +6,9 @@ import {
 import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
-import type { EventTriggerType, RunError, RunLogEntry, RunStatus } from '$lib/server/db/types';
+import type { EventTriggerType, RunError, RunStatus } from '$lib/server/db/types';
 import { getEnv } from '$lib/server/env';
-import { classifyInfraFailure } from './run-error';
+import { type DispatchEvent, type InvokeOutcome, invokeDispatcher } from './dispatch';
 
 export interface ExecuteSourceEventOptions {
 	eventSourceId: string;
@@ -51,18 +51,6 @@ export interface ExecuteExistingForWorkflowOptions {
 	isReplay?: boolean;
 	parentRunId?: string;
 }
-
-interface InvokeResponseBody {
-	ok: boolean;
-	result?: unknown;
-	error?: RunError;
-	logs?: RunLogEntry[];
-}
-
-type DispatchOutcome =
-	| { kind: 'ok'; result: unknown; logs: RunLogEntry[] }
-	| { kind: 'user_error'; error: RunError; logs: RunLogEntry[] }
-	| { kind: 'infra_error'; error: RunError };
 
 const DISPATCH_MAX_ATTEMPTS = 4;
 const DISPATCH_BASE_DELAY_MS = 200;
@@ -111,87 +99,17 @@ async function retryWithBackoff<T>(
 	return last;
 }
 
-async function dispatchOnce(args: {
-	deployPath: string;
-	workflowId: string;
-	workflowName: string;
-	event: {
-		id: string;
-		triggerType: EventTriggerType;
-		receivedAt: number;
-		payload: unknown;
-		headers: Record<string, string>;
-	};
-}): Promise<DispatchOutcome> {
-	const env = getEnv();
-	try {
-		const response = await env.DISPATCHER.get(args.deployPath).fetch('https://workflow.invoke/', {
-			body: JSON.stringify({
-				event: args.event,
-				workflow: { id: args.workflowId, name: args.workflowName }
-			}),
-			headers: { 'content-type': 'application/json' },
-			method: 'POST'
-		});
-		if (!response.ok) {
-			return {
-				error: classifyInfraFailure(
-					'DispatchHttpError',
-					`dispatcher returned HTTP ${response.status}`
-				),
-				kind: 'infra_error'
-			};
-		}
-		let body: InvokeResponseBody;
-		try {
-			body = (await response.json()) as InvokeResponseBody;
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
-			return {
-				error: classifyInfraFailure('InvalidDispatchBody', `dispatcher body parse failed: ${msg}`),
-				kind: 'infra_error'
-			};
-		}
-		const logs = body.logs ?? [];
-		if (body.ok) {
-			return { kind: 'ok', logs, result: body.result };
-		}
-		const rawErr = body.error ?? {
-			message: 'workflow reported failure with no error',
-			name: 'Error'
-		};
-		return {
-			error: { ...rawErr, category: 'user_code' },
-			kind: 'user_error',
-			logs
-		};
-	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
-		return {
-			error: classifyInfraFailure('DispatchNetworkError', `dispatcher fetch threw: ${msg}`),
-			kind: 'infra_error'
-		};
-	}
-}
-
 async function dispatchWithRetry(args: {
-	deployPath: string;
-	workflowId: string;
-	workflowName: string;
-	event: {
-		id: string;
-		triggerType: EventTriggerType;
-		receivedAt: number;
-		payload: unknown;
-		headers: Record<string, string>;
-	};
-}): Promise<DispatchOutcome> {
-	const result = await retryWithBackoff<DispatchOutcome>(
+	scriptName: string;
+	event: DispatchEvent;
+	workflow: { id: string; name: string };
+}): Promise<InvokeOutcome> {
+	const result = await retryWithBackoff<InvokeOutcome>(
 		'dispatch',
 		DISPATCH_MAX_ATTEMPTS,
 		DISPATCH_BASE_DELAY_MS,
 		async () => {
-			const outcome = await dispatchOnce(args);
+			const outcome = await invokeDispatcher(args);
 			if (outcome.kind !== 'infra_error') {
 				return { done: true, value: outcome };
 			}
@@ -308,7 +226,6 @@ export async function executeExistingEventForWorkflow(
 		});
 
 		const outcome = await dispatchWithRetry({
-			deployPath: version.deployPath,
 			event: {
 				headers: event.headers,
 				id: event.id,
@@ -316,8 +233,8 @@ export async function executeExistingEventForWorkflow(
 				receivedAt: event.receivedAt,
 				triggerType: event.triggerType
 			},
-			workflowId: workflow.id,
-			workflowName: workflow.name
+			scriptName: version.deployPath,
+			workflow: { id: workflow.id, name: workflow.name }
 		});
 
 		if (outcome.kind === 'ok') {
