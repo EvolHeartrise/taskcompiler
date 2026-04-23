@@ -1,9 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { executeEvent } from '$lib/server/engine';
+import { executeExistingEvent } from '$lib/server/engine';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
+import { ingestWebhookEvent } from '$lib/server/webhooks/ingest';
 
-type ExecResponse = Awaited<ReturnType<typeof executeEvent>>;
+type ExecResponse = Awaited<ReturnType<typeof executeExistingEvent>>;
 
 function errorJson(status: number, message: string): Response {
 	return json({ error: { message, name: 'TriggerError' } }, { status });
@@ -37,7 +38,7 @@ async function parseBody(
 	}
 }
 
-function toResponse(res: ExecResponse): Response {
+function executedResponse(res: ExecResponse): Response {
 	const body: Record<string, unknown> = {
 		eventId: res.eventId,
 		runId: res.runId,
@@ -50,6 +51,13 @@ function toResponse(res: ExecResponse): Response {
 		body.error = res.error;
 	}
 	return json(body, { status: 200 });
+}
+
+function pendingResponse(eventId: string, isNewShape: boolean): Response {
+	// 202 Accepted: event captured for shape inference; workflow isn't ready
+	// To execute yet (no current version). Phase 3 will trigger generation
+	// Here when status === 'awaiting_first_event'.
+	return json({ eventId, isNewShape, status: 'pending' as const }, { status: 202 });
 }
 
 export const POST: RequestHandler = async ({ params, request }) => {
@@ -72,12 +80,18 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	}
 
 	try {
-		const res = await executeEvent({
+		const ingest = await ingestWebhookEvent({
 			payload: parsed.payload,
-			trigger: 'webhook',
+			rawHeaders: request.headers,
 			workflowId
 		});
-		return toResponse(res);
+
+		if (!wf.currentVersionId) {
+			return pendingResponse(ingest.event.id, ingest.isNewShape);
+		}
+
+		const res = await executeExistingEvent(ingest.event.id);
+		return executedResponse(res);
 	} catch (error) {
 		const e = error as Error;
 		return json(
@@ -87,7 +101,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	}
 };
 
-export const GET: RequestHandler = async ({ params, url }) => {
+export const GET: RequestHandler = async ({ params, request, url }) => {
 	const { workflowId } = params;
 	if (!workflowId) {
 		return errorJson(400, 'missing workflowId');
@@ -107,12 +121,18 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	}
 
 	try {
-		const res = await executeEvent({
+		const ingest = await ingestWebhookEvent({
 			payload,
-			trigger: 'webhook',
+			rawHeaders: request.headers,
 			workflowId
 		});
-		return toResponse(res);
+
+		if (!wf.currentVersionId) {
+			return pendingResponse(ingest.event.id, ingest.isNewShape);
+		}
+
+		const res = await executeExistingEvent(ingest.event.id);
+		return executedResponse(res);
 	} catch (error) {
 		const e = error as Error;
 		return json(
