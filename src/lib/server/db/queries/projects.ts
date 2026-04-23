@@ -29,14 +29,13 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
 		)
 		.bind(id, input.userId, input.name, ts, ts)
 		.run();
-	const row = await getDb()
-		.prepare(`SELECT * FROM projects WHERE id = ?`)
-		.bind(id)
-		.first<ProjectRow>();
-	if (!row) {
-		throw new Error(`createProject: row missing after insert (id=${id})`);
-	}
-	return rowToProject(row);
+	return {
+		createdAt: ts,
+		id,
+		name: input.name,
+		updatedAt: ts,
+		userId: input.userId
+	};
 }
 
 export async function listProjectsForUser(userId: string): Promise<Project[]> {

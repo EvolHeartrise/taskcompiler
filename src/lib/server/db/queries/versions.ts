@@ -39,6 +39,8 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 		.bind(input.workflowId)
 		.first<{ max_version: number }>();
 	const version = (maxRow?.max_version ?? 0) + 1;
+	const parentVersionId = input.parentVersionId ?? null;
+	const healedFromRunId = input.healedFromRunId ?? null;
 
 	const insertStmt = db
 		.prepare(
@@ -54,8 +56,8 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 			input.deployPath,
 			ts,
 			input.createdBy,
-			input.parentVersionId ?? null,
-			input.healedFromRunId ?? null
+			parentVersionId,
+			healedFromRunId
 		);
 
 	if (input.setAsCurrent) {
@@ -67,14 +69,17 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 		await insertStmt.run();
 	}
 
-	const saved = await db
-		.prepare(`SELECT * FROM workflow_versions WHERE id = ?`)
-		.bind(id)
-		.first<WorkflowVersionRow>();
-	if (!saved) {
-		throw new Error(`createVersion: row missing after insert (id=${id})`);
-	}
-	return rowToVersion(saved);
+	return {
+		createdAt: ts,
+		createdBy: input.createdBy,
+		deployPath: input.deployPath,
+		healedFromRunId,
+		id,
+		parentVersionId,
+		sourceTs: input.sourceTs,
+		version,
+		workflowId: input.workflowId
+	};
 }
 
 export async function getVersion(id: string): Promise<WorkflowVersion | null> {

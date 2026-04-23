@@ -34,14 +34,16 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 		)
 		.bind(id, input.projectId, input.eventSourceId, input.name, input.prompt, ts, ts)
 		.run();
-	const row = await getDb()
-		.prepare(`SELECT * FROM workflows WHERE id = ?`)
-		.bind(id)
-		.first<WorkflowRow>();
-	if (!row) {
-		throw new Error(`createWorkflow: row missing after insert (id=${id})`);
-	}
-	return rowToWorkflow(row);
+	return {
+		createdAt: ts,
+		currentVersionId: null,
+		eventSourceId: input.eventSourceId,
+		id,
+		name: input.name,
+		projectId: input.projectId,
+		prompt: input.prompt,
+		updatedAt: ts
+	};
 }
 
 // System-level lookup (cron/webhook/executor/heal). Does not enforce project_id;

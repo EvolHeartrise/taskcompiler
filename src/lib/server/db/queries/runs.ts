@@ -44,6 +44,8 @@ export interface CreateRunInput {
 export async function createRun(input: CreateRunInput): Promise<Run> {
 	const id = uuid();
 	const startedAt = now();
+	const isReplay = input.isReplay ?? false;
+	const parentRunId = input.parentRunId ?? null;
 	await getDb()
 		.prepare(
 			`INSERT INTO runs
@@ -56,15 +58,24 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
 			input.workflowId,
 			input.versionId,
 			startedAt,
-			input.isReplay ? 1 : 0,
-			input.parentRunId ?? null
+			isReplay ? 1 : 0,
+			parentRunId
 		)
 		.run();
-	const row = await getDb().prepare(`SELECT * FROM runs WHERE id = ?`).bind(id).first<RunRow>();
-	if (!row) {
-		throw new Error(`createRun: row missing after insert (id=${id})`);
-	}
-	return rowToRun(row);
+	return {
+		error: null,
+		eventId: input.eventId,
+		finishedAt: null,
+		id,
+		isReplay,
+		logs: null,
+		parentRunId,
+		result: null,
+		startedAt,
+		status: 'running',
+		versionId: input.versionId,
+		workflowId: input.workflowId
+	};
 }
 
 export async function finishRunOk(
