@@ -14,10 +14,10 @@ export const actions: Actions = {
 		const values = { cronExpr, name, prompt, trigger: triggerRaw };
 
 		if (!name) {
-			return fail(400, { values, error: 'Name is required.' });
+			return fail(400, { error: 'Name is required.', values });
 		}
 		if (!prompt) {
-			return fail(400, { values, error: 'Prompt is required.' });
+			return fail(400, { error: 'Prompt is required.', values });
 		}
 		if (triggerRaw !== 'webhook' && triggerRaw !== 'cron') {
 			return fail(400, { error: 'Trigger must be webhook or cron.', values });
@@ -48,25 +48,31 @@ export const actions: Actions = {
 			return fail(500, { error: `Could not create workflow: ${message}`, values });
 		}
 
-		try {
-			await event.platform.env.GEN_WORKFLOW.create({
-				id: `gen-${workflowId}`,
-				params: {
-					cronExpr: cronExpr || null,
-					name,
-					prompt,
-					triggerType: trigger,
-					workflowId
-				}
-			});
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			return fail(500, {
-				error: `Could not start generation workflow: ${message}`,
-				values
-			});
+		// Webhook workflows wait for their first event before generating, so the
+		// Agent can read a real sample to type the event parameter. Cron workflows
+		// Have no inbound payload and generate immediately.
+		if (trigger === 'cron') {
+			try {
+				await event.platform.env.GEN_WORKFLOW.create({
+					id: `gen-${workflowId}`,
+					params: {
+						cronExpr: cronExpr || null,
+						name,
+						prompt,
+						triggerType: trigger,
+						workflowId
+					}
+				});
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return fail(500, {
+					error: `Could not start generation workflow: ${message}`,
+					values
+				});
+			}
+			redirect(303, `/p/${projectId}/w/${workflowId}?gen=pending`);
 		}
 
-		redirect(303, `/p/${projectId}/w/${workflowId}?gen=pending`);
+		redirect(303, `/p/${projectId}/w/${workflowId}?gen=awaiting_first_event`);
 	}
 };

@@ -151,6 +151,19 @@ export async function updateWorkflow(
 	return next;
 }
 
+// Atomic transition awaiting_first_event → generating. Returns true if this
+// Caller won the race; the winner is responsible for kicking off GEN_WORKFLOW.
+export async function claimAwaitingForGeneration(workflowId: string): Promise<boolean> {
+	const res = await getDb()
+		.prepare(
+			`UPDATE workflows SET status = 'generating', updated_at = ?
+			 WHERE id = ? AND status = 'awaiting_first_event'`
+		)
+		.bind(now(), workflowId)
+		.run();
+	return (res.meta?.changes ?? 0) > 0;
+}
+
 export async function setInferredEventType(
 	workflowId: string,
 	typeTs: string | null
