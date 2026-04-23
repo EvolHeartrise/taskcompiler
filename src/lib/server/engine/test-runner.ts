@@ -1,8 +1,7 @@
-import type { Response as CfResponse } from '@cloudflare/workers-types';
-import { getEnv } from '$lib/server/env';
 import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 import { projectIdBinding, testScriptName } from '$lib/server/workflows-store';
 import type { Event, RunError, RunLogEntry, Workflow } from '$lib/server/db/types';
+import { invokeDispatcher } from './dispatch';
 import { toRunError } from './run-error';
 
 export interface EphemeralRunResult {
@@ -11,13 +10,6 @@ export interface EphemeralRunResult {
 	logs: RunLogEntry[];
 	result?: unknown;
 	durationMs: number;
-}
-
-interface InvokeResponseBody {
-	ok: boolean;
-	result?: unknown;
-	error?: RunError;
-	logs?: RunLogEntry[];
 }
 
 function ephemeralNonce(): string {
@@ -51,60 +43,26 @@ export async function runAgainstEventEphemeral(
 			};
 		}
 
-		const env = getEnv();
-		let response: CfResponse;
-		try {
-			response = await env.DISPATCHER.get(scriptName).fetch('https://workflow.invoke/', {
-				body: JSON.stringify({
-					event: {
-						headers: event.headers,
-						id: event.id,
-						payload: event.payload,
-						receivedAt: event.receivedAt,
-						triggerType: event.triggerType
-					},
-					workflow: { id: workflow.id, name: workflow.name }
-				}),
-				headers: { 'content-type': 'application/json' },
-				method: 'POST'
-			});
-		} catch (error) {
-			return {
-				durationMs: Date.now() - started,
-				error: toRunError(error),
-				logs: [],
-				ok: false
-			};
-		}
+		const outcome = await invokeDispatcher({
+			event: {
+				headers: event.headers,
+				id: event.id,
+				payload: event.payload,
+				receivedAt: event.receivedAt,
+				triggerType: event.triggerType
+			},
+			scriptName,
+			workflow: { id: workflow.id, name: workflow.name }
+		});
 
-		let body: InvokeResponseBody;
-		try {
-			body = (await response.json()) as InvokeResponseBody;
-		} catch (error) {
-			return {
-				durationMs: Date.now() - started,
-				error: toRunError(error),
-				logs: [],
-				ok: false
-			};
-		}
-
-		const logs = body.logs ?? [];
-		if (body.ok) {
-			return {
-				durationMs: Date.now() - started,
-				logs,
-				ok: true,
-				result: body.result
-			};
+		const durationMs = Date.now() - started;
+		if (outcome.kind === 'ok') {
+			return { durationMs, logs: outcome.logs, ok: true, result: outcome.result };
 		}
 		return {
-			durationMs: Date.now() - started,
-			error: body.error ?? {
-				message: 'workflow reported failure with no error',
-				name: 'Error'
-			},
-			logs,
+			durationMs,
+			error: outcome.error,
+			logs: outcome.kind === 'user_error' ? outcome.logs : [],
 			ok: false
 		};
 	} finally {
