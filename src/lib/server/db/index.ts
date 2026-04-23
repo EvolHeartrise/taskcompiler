@@ -11,3 +11,10 @@ export function uuid(): string {
 export function now(): number {
 	return Date.now();
 }
+
+export function parseJson<T>(s: string | null): T | null {
+	if (s === null) {
+		return null;
+	}
+	return JSON.parse(s) as T;
+}

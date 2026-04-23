@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, now, parseJson, uuid } from '../index.ts';
 import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
 
 interface RunRow {
@@ -14,13 +14,6 @@ interface RunRow {
 	logs_json: string | null;
 	is_replay: number;
 	parent_run_id: string | null;
-}
-
-function parseJson<T>(s: string | null): T | null {
-	if (s === null) {
-		return null;
-	}
-	return JSON.parse(s) as T;
 }
 
 function rowToRun(row: RunRow): Run {

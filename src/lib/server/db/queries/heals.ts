@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, now, parseJson, uuid } from '../index.ts';
 import type {
 	HealAgentTranscriptEntry,
 	HealSession,
@@ -21,13 +21,6 @@ interface HealSessionRow {
 	unhealable_category: UnhealableCategory | null;
 	unhealable_reason: string | null;
 	resolved_at: number | null;
-}
-
-function parseJson<T>(s: string | null): T | null {
-	if (s === null) {
-		return null;
-	}
-	return JSON.parse(s) as T;
 }
 
 function rowToHealSession(row: HealSessionRow): HealSession {
