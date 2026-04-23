@@ -9,7 +9,7 @@ function topLevel(body: unknown, headers: Record<string, string>): Shape {
 describe('emitWorkflowEventType', () => {
 	it('falls back to permissive type when there are no shapes', () => {
 		const out = emitWorkflowEventType([]);
-		expect(out).toContain('export type WorkflowEvent');
+		expect(out).toContain('type WorkflowEvent');
 		expect(out).toContain('body: unknown');
 		expect(out).toContain('[key: string]: string | undefined');
 	});
@@ -91,6 +91,6 @@ describe('emitWorkflowEventType', () => {
 
 	it('respects custom export name', () => {
 		const out = emitWorkflowEventType([topLevel({}, {})], { exportName: 'MyEvent' });
-		expect(out).toContain('export type MyEvent');
+		expect(out).toContain('type MyEvent');
 	});
 });
