@@ -1,5 +1,8 @@
 import { createEvent, getEvent } from '$lib/server/db/queries/events';
-import { getActiveHealSession, getOpenNeedsAttentionSession } from '$lib/server/db/queries/heals';
+import {
+	getActiveHealSession,
+	getOpenNeedsAttentionSession
+} from '$lib/server/db/queries/heal-sessions';
 import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
