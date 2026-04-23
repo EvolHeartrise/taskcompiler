@@ -1,4 +1,4 @@
-import { error, fail } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import type { Workflow } from '@cloudflare/workers-types';
 import type { Actions, PageServerLoad } from './$types';
 import { getWorkflowForUser } from '$lib/server/db/queries/workflows';
@@ -11,6 +11,7 @@ import {
 	markHealSessionResolved
 } from '$lib/server/db/queries/heals';
 import { executeEvent, replayFailedEvents } from '$lib/server/engine';
+import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { highlightTs } from '$lib/server/highlight';
 
 export interface InFlightStatus {
@@ -130,6 +131,30 @@ async function assertOwnership(workflowId: string, userId: string | undefined): 
 }
 
 export const actions: Actions = {
+	delete: async ({ params, request, locals }) => {
+		if (!locals.user) error(401, 'unauthorized');
+		const workflow = await getWorkflowForUser(params.workflowId, locals.user.id);
+		if (!workflow) error(404, 'Workflow not found');
+
+		const data = await request.formData();
+		const confirmName = (data.get('confirm_name') ?? '').toString();
+		if (confirmName !== workflow.name) {
+			return fail(400, {
+				delete: {
+					error: `Type the workflow name exactly to confirm. Expected "${workflow.name}".`
+				}
+			});
+		}
+
+		try {
+			await tearDownWorkflow(workflow.id);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return fail(500, { delete: { error: `Delete failed: ${msg}` } });
+		}
+		redirect(303, '/');
+	},
+
 	resume: async ({ params, locals }) => {
 		await assertOwnership(params.workflowId, locals.user?.id);
 		try {

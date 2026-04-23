@@ -133,6 +133,10 @@
 
 	const triggerResult = $derived(form?.trigger);
 	const resumeResult = $derived(form?.resume);
+	const deleteResult = $derived(form?.delete);
+
+	let deleteConfirmName = $state('');
+	let canDelete = $derived(deleteConfirmName === data.workflow.name);
 
 	const UNHEALABLE_LABELS: Record<string, string> = {
 		third_party_outage: 'Third-party outage',
@@ -323,6 +327,42 @@
 				{:else if 'error' in triggerResult}
 					<div class="alert">{triggerResult.error}</div>
 				{/if}
+			{/if}
+		</div>
+	</section>
+
+	<section class="danger-zone">
+		<div class="card danger">
+			<h2>Danger zone</h2>
+			<p class="muted small">
+				Permanently delete this workflow and everything it owns — every version, every deployed
+				worker script, all events, runs, and heal sessions. This cannot be undone.
+			</p>
+			<form
+				method="POST"
+				action="?/delete"
+				use:enhance={() => {
+					return async ({ update }) => {
+						await update({ reset: false });
+					};
+				}}
+			>
+				<label class="field">
+					<span>Type <code>{data.workflow.name}</code> to confirm</span>
+					<input
+						name="confirm_name"
+						type="text"
+						bind:value={deleteConfirmName}
+						autocomplete="off"
+						spellcheck="false"
+					/>
+				</label>
+				<button class="btn danger" type="submit" disabled={!canDelete}>
+					Delete this workflow
+				</button>
+			</form>
+			{#if deleteResult && 'error' in deleteResult}
+				<div class="alert">{deleteResult.error}</div>
 			{/if}
 		</div>
 	</section>
@@ -765,6 +805,40 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 16px;
+	}
+	.danger-zone {
+		margin-top: 20px;
+	}
+	.card.danger {
+		border-color: #fecaca;
+	}
+	.card.danger h2 {
+		color: #991b1b;
+	}
+	.card.danger form {
+		margin-top: 10px;
+	}
+	.card.danger input[type='text'] {
+		width: 100%;
+		padding: 8px 10px;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		font: inherit;
+		font-family: ui-monospace, monospace;
+	}
+	.btn.danger {
+		background: #dc2626;
+		border-color: #dc2626;
+		color: #fff;
+	}
+	.btn.danger:hover:not(:disabled) {
+		background: #991b1b;
+		border-color: #991b1b;
+	}
+	.btn.danger:disabled {
+		background: #fca5a5;
+		border-color: #fca5a5;
+		cursor: not-allowed;
 	}
 	.split {
 		display: grid;

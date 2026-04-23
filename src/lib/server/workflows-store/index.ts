@@ -1,4 +1,5 @@
-import { getWorkflow } from '$lib/server/db/queries/workflows';
+import { deleteWorkflow as deleteWorkflowRow, getWorkflow } from '$lib/server/db/queries/workflows';
+import { listVersions } from '$lib/server/db/queries/versions';
 import { type WfpBinding, deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 
 // Worker script names: lowercase alphanumeric + hyphens, max 63 chars.
@@ -48,4 +49,38 @@ export async function writeVersion(
 
 export async function deleteWorkflowVersion(scriptName: string): Promise<void> {
 	await deleteWorkflow(scriptName);
+}
+
+export interface TearDownResult {
+	scriptsDeleted: number;
+	scriptsFailed: number;
+	dbDeleted: boolean;
+}
+
+/**
+ * Delete a workflow and every artifact we own for it: every deployed WFP
+ * script (one per version) plus the DB rows. WFP script deletes are best-
+ * effort — a failed script delete is logged but does not block the DB
+ * delete, since leaving a workflow row pointing at missing scripts is
+ * worse than leaving orphan scripts (those can be cleaned up later).
+ */
+export async function tearDownWorkflow(workflowId: string): Promise<TearDownResult> {
+	const versions = await listVersions(workflowId);
+	let scriptsDeleted = 0;
+	let scriptsFailed = 0;
+	for (const v of versions) {
+		try {
+			await deleteWorkflow(v.deployPath);
+			scriptsDeleted += 1;
+		} catch (error) {
+			scriptsFailed += 1;
+			console.error('[teardown] WFP delete failed', {
+				workflowId,
+				scriptName: v.deployPath,
+				error: error instanceof Error ? error.message : String(error)
+			});
+		}
+	}
+	const dbDeleted = await deleteWorkflowRow(workflowId);
+	return { dbDeleted, scriptsDeleted, scriptsFailed };
 }

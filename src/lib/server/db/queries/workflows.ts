@@ -16,16 +16,16 @@ interface WorkflowRow {
 
 function rowToWorkflow(row: WorkflowRow): Workflow {
 	return {
+		createdAt: row.created_at,
+		cronExpr: row.cron_expr,
+		currentVersionId: row.current_version_id,
 		id: row.id,
-		userId: row.user_id,
+		lastFiredAt: row.last_fired_at,
 		name: row.name,
 		prompt: row.prompt,
-		currentVersionId: row.current_version_id,
 		triggerType: row.trigger_type,
-		cronExpr: row.cron_expr,
-		createdAt: row.created_at,
 		updatedAt: row.updated_at,
-		lastFiredAt: row.last_fired_at
+		userId: row.user_id
 	};
 }
 
@@ -61,12 +61,14 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 		.prepare(`SELECT * FROM workflows WHERE id = ?`)
 		.bind(id)
 		.first<WorkflowRow>();
-	if (!row) throw new Error(`createWorkflow: row missing after insert (id=${id})`);
+	if (!row) {
+		throw new Error(`createWorkflow: row missing after insert (id=${id})`);
+	}
 	return rowToWorkflow(row);
 }
 
 // System-level lookup (cron/webhook/executor/heal). Does not enforce user_id;
-// callers already trust the id. Prefer `getWorkflowForUser` in UI code paths.
+// Callers already trust the id. Prefer `getWorkflowForUser` in UI code paths.
 export async function getWorkflow(id: string): Promise<Workflow | null> {
 	const row = await getDb()
 		.prepare(`SELECT * FROM workflows WHERE id = ?`)
@@ -103,13 +105,15 @@ export async function updateWorkflow(
 	patch: UpdateWorkflowInput
 ): Promise<Workflow | null> {
 	const existing = await getWorkflow(id);
-	if (!existing) return null;
+	if (!existing) {
+		return null;
+	}
 	const next: Workflow = {
 		...existing,
-		name: patch.name ?? existing.name,
 		cronExpr: patch.cronExpr === undefined ? existing.cronExpr : patch.cronExpr,
 		currentVersionId:
 			patch.currentVersionId === undefined ? existing.currentVersionId : patch.currentVersionId,
+		name: patch.name ?? existing.name,
 		triggerType: patch.triggerType ?? existing.triggerType,
 		updatedAt: now()
 	};
@@ -125,8 +129,31 @@ export async function updateWorkflow(
 }
 
 export async function deleteWorkflow(id: string): Promise<boolean> {
-	const res = await getDb().prepare(`DELETE FROM workflows WHERE id = ?`).bind(id).run();
-	return (res.meta.changes ?? 0) > 0;
+	// Ordered cascade. The schema has several non-CASCADE FKs between child
+	// Tables (heal_sessions → runs, workflow_versions → runs, versions → versions,
+	// Runs → runs) plus a circular ref workflows.current_version_id ↔
+	// Workflow_versions.workflow_id. We null the cross-child references first
+	// And then delete rows in an order that respects the remaining FKs, all
+	// As a single batched transaction so a mid-delete failure rolls back.
+	const db = getDb();
+	const results = await db.batch([
+		db.prepare(`UPDATE workflows SET current_version_id = NULL WHERE id = ?`).bind(id),
+		db
+			.prepare(`UPDATE workflow_versions SET healed_from_run_id = NULL WHERE workflow_id = ?`)
+			.bind(id),
+		db
+			.prepare(`UPDATE workflow_versions SET parent_version_id = NULL WHERE workflow_id = ?`)
+			.bind(id),
+		db.prepare(`UPDATE runs SET parent_run_id = NULL WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM heal_sessions WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM runs WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM workflow_versions WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM events WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM workflow_state WHERE workflow_id = ?`).bind(id),
+		db.prepare(`DELETE FROM workflows WHERE id = ?`).bind(id)
+	]);
+	const last = results.at(-1);
+	return (last?.meta?.changes ?? 0) > 0;
 }
 
 export async function listCronWorkflows(): Promise<Workflow[]> {
