@@ -67,26 +67,18 @@ export interface ListEventsOptions {
 	since?: number;
 }
 
+// SQLite treats a negative LIMIT as unbounded, letting us express "no limit"
+// In a single parameterised query instead of branching the statement.
 export async function listEventsForSource(
 	sourceId: string,
 	opts: ListEventsOptions = {}
 ): Promise<Event[]> {
-	const since = opts.since ?? 0;
-	const db = getDb();
-	const res =
-		opts.limit !== undefined
-			? await db
-					.prepare(
-						`SELECT * FROM events WHERE event_source_id = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`
-					)
-					.bind(sourceId, since, opts.limit)
-					.all<EventRow>()
-			: await db
-					.prepare(
-						`SELECT * FROM events WHERE event_source_id = ? AND received_at >= ? ORDER BY received_at DESC`
-					)
-					.bind(sourceId, since)
-					.all<EventRow>();
+	const res = await getDb()
+		.prepare(
+			`SELECT * FROM events WHERE event_source_id = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`
+		)
+		.bind(sourceId, opts.since ?? 0, opts.limit ?? -1)
+		.all<EventRow>();
 	return res.results.map(rowToEvent);
 }
 
@@ -96,28 +88,15 @@ export async function listEventsForWorkflow(
 	workflowId: string,
 	opts: ListEventsOptions = {}
 ): Promise<Event[]> {
-	const since = opts.since ?? 0;
-	const db = getDb();
-	const res =
-		opts.limit !== undefined
-			? await db
-					.prepare(
-						`SELECT e.* FROM events e
-						 JOIN workflows w ON w.event_source_id = e.event_source_id
-						 WHERE w.id = ? AND e.received_at >= ?
-						 ORDER BY e.received_at DESC LIMIT ?`
-					)
-					.bind(workflowId, since, opts.limit)
-					.all<EventRow>()
-			: await db
-					.prepare(
-						`SELECT e.* FROM events e
-						 JOIN workflows w ON w.event_source_id = e.event_source_id
-						 WHERE w.id = ? AND e.received_at >= ?
-						 ORDER BY e.received_at DESC`
-					)
-					.bind(workflowId, since)
-					.all<EventRow>();
+	const res = await getDb()
+		.prepare(
+			`SELECT e.* FROM events e
+			 JOIN workflows w ON w.event_source_id = e.event_source_id
+			 WHERE w.id = ? AND e.received_at >= ?
+			 ORDER BY e.received_at DESC LIMIT ?`
+		)
+		.bind(workflowId, opts.since ?? 0, opts.limit ?? -1)
+		.all<EventRow>();
 	return res.results.map(rowToEvent);
 }
 
