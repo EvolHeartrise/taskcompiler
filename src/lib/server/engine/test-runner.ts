@@ -2,6 +2,7 @@ import { getEnv } from '$lib/server/env';
 import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 import { projectIdBinding, testScriptName } from '$lib/server/workflows-store';
 import type { Event, RunError, RunLogEntry, Workflow } from '$lib/server/db/types';
+import { toRunError } from './run-error';
 
 export interface EphemeralRunResult {
 	ok: boolean;
@@ -16,39 +17,6 @@ interface InvokeResponseBody {
 	result?: unknown;
 	error?: RunError;
 	logs?: RunLogEntry[];
-}
-
-function toRunError(err: unknown): RunError {
-	if (err instanceof Error) {
-		const out: RunError = {
-			message: err.message || String(err),
-			name: err.name || 'Error'
-		};
-		if (err.stack) {
-			out.stack = err.stack;
-		}
-		return out;
-	}
-	if (typeof err === 'object' && err !== null) {
-		const anyErr = err as { name?: unknown; message?: unknown; stack?: unknown };
-		const out: RunError = {
-			message: typeof anyErr.message === 'string' ? anyErr.message : safeStringify(err),
-			name: typeof anyErr.name === 'string' ? anyErr.name : 'NonError'
-		};
-		if (typeof anyErr.stack === 'string') {
-			out.stack = anyErr.stack;
-		}
-		return out;
-	}
-	return { message: safeStringify(err), name: 'NonError' };
-}
-
-function safeStringify(v: unknown): string {
-	try {
-		return typeof v === 'string' ? v : JSON.stringify(v);
-	} catch {
-		return String(v);
-	}
 }
 
 function ephemeralNonce(): string {
