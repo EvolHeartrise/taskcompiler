@@ -1,6 +1,6 @@
 import { getEnv } from '$lib/server/env';
 import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
-import { buildSecretBindings, testScriptName } from '$lib/server/workflows-store';
+import { testScriptName, userIdBinding } from '$lib/server/workflows-store';
 import type { Event, RunError, RunLogEntry, Workflow } from '$lib/server/db/types';
 
 export interface EphemeralRunResult {
@@ -52,7 +52,7 @@ function safeStringify(v: unknown): string {
 }
 
 function ephemeralNonce(): string {
-	const u = crypto.randomUUID().replaceAll(/-/g, '');
+	const u = crypto.randomUUID().replaceAll('-', '');
 	return u.slice(0, 8);
 }
 
@@ -67,15 +67,18 @@ export async function runAgainstEventEphemeral(
 	let uploaded = false;
 	try {
 		try {
-			const bindings = await buildSecretBindings(workflow.userId);
-			await uploadWorkflow({ bindings, scriptName, userSourceTs: sourceTs });
+			await uploadWorkflow({
+				bindings: [userIdBinding(workflow.userId)],
+				scriptName,
+				userSourceTs: sourceTs
+			});
 			uploaded = true;
 		} catch (error) {
 			return {
-				ok: false,
+				durationMs: Date.now() - started,
 				error: toRunError(error),
 				logs: [],
-				durationMs: Date.now() - started
+				ok: false
 			};
 		}
 
@@ -84,23 +87,23 @@ export async function runAgainstEventEphemeral(
 		try {
 			response = await env.DISPATCHER.get(scriptName).fetch('https://workflow.invoke/', {
 				body: JSON.stringify({
-					workflow: { id: workflow.id, name: workflow.name },
 					event: {
 						id: event.id,
-						triggerType: event.triggerType,
+						payload: event.payload,
 						receivedAt: event.receivedAt,
-						payload: event.payload
-					}
+						triggerType: event.triggerType
+					},
+					workflow: { id: workflow.id, name: workflow.name }
 				}),
 				headers: { 'content-type': 'application/json' },
 				method: 'POST'
 			});
 		} catch (error) {
 			return {
-				ok: false,
+				durationMs: Date.now() - started,
 				error: toRunError(error),
 				logs: [],
-				durationMs: Date.now() - started
+				ok: false
 			};
 		}
 
@@ -109,10 +112,10 @@ export async function runAgainstEventEphemeral(
 			body = (await response.json()) as InvokeResponseBody;
 		} catch (error) {
 			return {
-				ok: false,
+				durationMs: Date.now() - started,
 				error: toRunError(error),
 				logs: [],
-				durationMs: Date.now() - started
+				ok: false
 			};
 		}
 
@@ -128,8 +131,8 @@ export async function runAgainstEventEphemeral(
 		return {
 			durationMs: Date.now() - started,
 			error: body.error ?? {
-				name: 'Error',
-				message: 'workflow reported failure with no error'
+				message: 'workflow reported failure with no error',
+				name: 'Error'
 			},
 			logs,
 			ok: false
@@ -140,8 +143,8 @@ export async function runAgainstEventEphemeral(
 				await deleteWorkflow(scriptName);
 			} catch (error) {
 				console.error('test-runner: failed to delete ephemeral script', {
-					scriptName,
-					error: error instanceof Error ? error.message : String(error)
+					error: error instanceof Error ? error.message : String(error),
+					scriptName
 				});
 			}
 		}

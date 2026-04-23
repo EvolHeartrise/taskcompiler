@@ -23,24 +23,15 @@
 		<h1>Secrets</h1>
 		<p class="muted">
 			Account-level secrets available to all your workflows via <code>ctx.secret("NAME")</code>.
-			Values are write-only — once saved they can't be viewed again, only overwritten.
+			Values are write-only — once saved they can't be viewed again, only overwritten. Changes take
+			effect on the next workflow invocation; no redeploy needed.
 		</p>
 	</div>
 </div>
 
 {#if upsertResult}
 	{#if 'ok' in upsertResult && upsertResult.ok}
-		<div class="result ok">
-			Saved <b>{upsertResult.name}</b>.
-			{#if upsertResult.redeploy}
-				Redeployed {upsertResult.redeploy.ok}/{upsertResult.redeploy.attempted} workflow{upsertResult
-					.redeploy.attempted === 1
-					? ''
-					: 's'}{upsertResult.redeploy.failed > 0
-					? ` (${upsertResult.redeploy.failed} failed — check logs)`
-					: ''}.
-			{/if}
-		</div>
+		<div class="result ok">Saved <b>{upsertResult.name}</b>.</div>
 	{:else if 'error' in upsertResult}
 		<div class="alert">{upsertResult.error}</div>
 	{/if}
@@ -48,15 +39,7 @@
 
 {#if deleteResult}
 	{#if 'ok' in deleteResult && deleteResult.ok}
-		<div class="result ok">
-			Deleted <b>{deleteResult.name}</b>.
-			{#if deleteResult.redeploy}
-				Redeployed {deleteResult.redeploy.ok}/{deleteResult.redeploy.attempted} workflow{deleteResult
-					.redeploy.attempted === 1
-					? ''
-					: 's'}.
-			{/if}
-		</div>
+		<div class="result ok">Deleted <b>{deleteResult.name}</b>.</div>
 	{:else if 'error' in deleteResult}
 		<div class="alert">{deleteResult.error}</div>
 	{/if}
