@@ -1,4 +1,4 @@
-import { getDb, now } from '../index.ts';
+import { getDb, now, parseJson } from '../index.ts';
 import type { WorkflowStateEntry } from '../types.ts';
 
 interface WorkflowStateRow {
@@ -12,7 +12,7 @@ function rowToEntry(row: WorkflowStateRow): WorkflowStateEntry {
 	return {
 		key: row.key,
 		updatedAt: row.updated_at,
-		value: JSON.parse(row.value_json) as unknown,
+		value: parseJson<unknown>(row.value_json),
 		workflowId: row.workflow_id
 	};
 }
@@ -25,7 +25,7 @@ export async function getState(workflowId: string, key: string): Promise<unknown
 	if (!row) {
 		return undefined;
 	}
-	return JSON.parse(row.value_json) as unknown;
+	return parseJson<unknown>(row.value_json);
 }
 
 export async function setState(workflowId: string, key: string, value: unknown): Promise<void> {
