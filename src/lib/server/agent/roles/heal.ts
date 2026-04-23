@@ -72,7 +72,7 @@ const UNHEALABLE_CATEGORIES: readonly UnhealableCategory[] = [
 export const HEAL_SYSTEM_PROMPT = `You are Runely's workflow healer. A user workflow just failed — your job is to diagnose the failure and either produce a corrected version or declare that no code change can fix it.
 
 ## Same contract as the gen role
-The workflow module is a single TypeScript file exporting \`export default async function run(event: WorkflowEvent, ctx: Ctx)\`. The ctx surface is fixed:
+The workflow module is a single TypeScript file exporting \`export default async function run(event: unknown, ctx: Ctx)\`. The ctx surface is fixed:
 - ctx.workflow: { id, name }
 - ctx.event: { id, triggerType, receivedAt }
 - ctx.http.{fetch,get,post}  // post auto-JSON-encodes plain objects
@@ -80,7 +80,7 @@ The workflow module is a single TypeScript file exporting \`export default async
 - ctx.state.get<T>(key) / ctx.state.set(key, value)
 - ctx.secret(name) -> string (throws if unset)
 
-No imports from node_modules, no relative imports. \`event\` is \`{ body, headers }\`, typed as \`WorkflowEvent\` — an ambient type inferred from this workflow's historical webhook payloads. The exact definition is shown in the user message; trust it as the source of truth. If multiple variants exist, narrow on a literal field (often a header like \`event.headers["x-github-event"]\`, sometimes a body discriminator) before accessing variant-specific fields. The type is fixed for this heal session even if new event shapes arrive mid-flight.
+No imports from node_modules, no relative imports. \`event\` is \`{ body, headers }\` at runtime — \`body\` is the parsed payload, \`headers\` is a lowercased Record<string, string> with auth/signature headers redacted to \`"<redacted>"\`. It's typed \`unknown\`, so validate the shape inside \`run\`.
 
 ## Your tools
 - read_source: current workflow TS
@@ -207,22 +207,12 @@ function buildUserMessage(args: {
 	failedEvent: Event | null;
 	historicalEventCount: number;
 	availableSecrets: string[];
-	workflowEventTypeTs: string | null;
 }): string {
 	const parts: string[] = [];
 	parts.push(`Workflow: ${args.workflowName} (id=${args.workflowId})`);
 	parts.push('');
 	parts.push('## Original user prompt');
 	parts.push(args.userPrompt || '(none)');
-	parts.push('');
-	parts.push('## WorkflowEvent type (inferred, ambient — fixed for this heal session)');
-	parts.push('```ts');
-	parts.push(
-		args.workflowEventTypeTs && args.workflowEventTypeTs.trim().length > 0
-			? args.workflowEventTypeTs
-			: 'type WorkflowEvent = { body: unknown; headers: { [key: string]: string | undefined } };'
-	);
-	parts.push('```');
 	parts.push('');
 	parts.push('## Available secrets (via ctx.secret)');
 	parts.push(
@@ -482,8 +472,7 @@ function makeRunTestEventTool(workflowId: string): Tool {
 function makeEmitFixedWorkflowTool(
 	state: { attempts: number; emitted: EmittedPayload | null },
 	maxAttempts: number,
-	secretNames: readonly string[],
-	workflowEventTypeTs: string | null
+	secretNames: readonly string[]
 ): Tool {
 	return {
 		description:
@@ -526,7 +515,7 @@ function makeEmitFixedWorkflowTool(
 				}
 				throw new Error(`${validation.error}. Fix the source and call emit_fixed_workflow again.`);
 			}
-			const tc = typecheckWorkflow(secretNames, source, workflowEventTypeTs);
+			const tc = typecheckWorkflow(secretNames, source);
 			if (!tc.ok) {
 				const details = tc.diagnostics.join('\n');
 				if (state.attempts >= maxAttempts) {
@@ -621,8 +610,6 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	const secretMetas = await listSecretNamesForProject(workflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
 
-	const workflowEventTypeTs = workflow.inferredEventTypeTs;
-
 	const userMessage = buildUserMessage({
 		availableSecrets: secretNames,
 		currentSource,
@@ -631,7 +618,6 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		triggeringError: triggeringRun?.error ?? null,
 		triggeringLogs: triggeringRun?.logs ?? null,
 		userPrompt: workflow.prompt,
-		workflowEventTypeTs,
 		workflowId: workflow.id,
 		workflowName: workflow.name
 	});
@@ -669,7 +655,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		makeListFailedRunsTool(opts.workflowId),
 		makeGetRunTool(opts.workflowId),
 		makeRunTestEventTool(opts.workflowId),
-		wrapTerminal(makeEmitFixedWorkflowTool(emitState, 2, secretNames, workflowEventTypeTs)),
+		wrapTerminal(makeEmitFixedWorkflowTool(emitState, 2, secretNames)),
 		wrapTerminal(makeEmitUnhealableTool(emitState))
 	];
 

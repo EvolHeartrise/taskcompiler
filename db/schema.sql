@@ -79,9 +79,6 @@ CREATE TABLE workflows (
   current_version_id TEXT REFERENCES workflow_versions(id),
   trigger_type TEXT NOT NULL CHECK(trigger_type IN ('webhook','cron')),
   cron_expr TEXT,
-  status TEXT NOT NULL CHECK(status IN ('awaiting_first_event','generating','ready','failed')),
-  inferred_event_type_ts TEXT,
-  inferred_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_fired_at INTEGER NOT NULL DEFAULT 0
@@ -108,28 +105,10 @@ CREATE TABLE events (
   trigger_type TEXT NOT NULL CHECK(trigger_type IN ('webhook','cron','manual','replay')),
   payload_json TEXT NOT NULL,
   headers_json TEXT NOT NULL DEFAULT '{}',
-  shape_hash TEXT,
   received_at INTEGER NOT NULL,
   dedup_key TEXT
 );
 CREATE INDEX idx_events_workflow_time ON events(workflow_id, received_at);
-
--- Deduplicated set of distinct {body, headers} shapes seen per workflow.
--- Insert/upsert on every webhook event so type inference reads at most a few
--- dozen rows regardless of total event volume. LRS-evict at 500 entries per
--- workflow.
-CREATE TABLE event_shapes (
-  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
-  shape_hash TEXT NOT NULL,
-  shape_json TEXT NOT NULL,
-  sample_payload_json TEXT NOT NULL,
-  sample_headers_json TEXT NOT NULL,
-  first_seen INTEGER NOT NULL,
-  last_seen INTEGER NOT NULL,
-  count INTEGER NOT NULL DEFAULT 1,
-  PRIMARY KEY (workflow_id, shape_hash)
-);
-CREATE INDEX idx_event_shapes_workflow_lru ON event_shapes(workflow_id, last_seen);
 
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,

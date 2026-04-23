@@ -44,7 +44,7 @@ const GEN_SYSTEM_PROMPT = `You are Runely's workflow generator. You turn a user'
 
 ## Contract
 The module MUST:
-- Export a default async function with signature: \`async function run(event: WorkflowEvent, ctx: Ctx): Promise<unknown>\`
+- Export a default async function with signature: \`async function run(event: unknown, ctx: Ctx): Promise<unknown>\`
 - Be self-contained: no imports from node_modules, no relative imports. All capabilities come from \`ctx\`.
 - Be fail-fast: on unrecoverable error, throw. On recoverable error that should halt the workflow, throw with a clear message.
 
@@ -60,22 +60,26 @@ The module MUST:
 - \`ctx.secret(name: string) => string\`   // reads from env; throws if missing
 
 ## Event shape
-\`event\` is \`{ body, headers }\`. \`body\` is the parsed request body (JSON object, form fields, plain text, or null). \`headers\` is a lowercased map of HTTP headers — auth/signature headers are redacted to \`"<redacted>"\` and Cloudflare/proxy noise headers are stripped, but discriminator headers like \`x-github-event\` or \`x-shopify-topic\` are preserved.
+\`event\` is \`{ body, headers }\` at runtime, but typed \`unknown\` — validate it inside \`run\` and throw on shape mismatch.
+- \`body\` is the parsed request body (JSON object, form fields, plain text, or null) for webhooks; \`{firedAt: number}\` for cron; or whatever the caller passed for manual/replay.
+- \`headers\` is a lowercased map of HTTP headers (Record<string, string>). Auth and signature headers are redacted to \`"<redacted>"\` and Cloudflare/proxy noise headers are stripped, but discriminator headers like \`x-github-event\` or \`x-shopify-topic\` are preserved. Cron/manual/replay events have \`headers: {}\`.
 
-The exact \`WorkflowEvent\` type is provided ambient and inferred from this workflow's historical webhook payloads. It's a discriminated union when multiple event shapes have been seen — narrow on a literal field (e.g. \`event.headers["x-github-event"]\` or a body-side discriminator) to access shape-specific fields. The type's definition is shown in the user message; trust it as the source of truth for what fields exist.
+A typical first step is something like:
+\`\`\`ts
+const { body, headers } = event as { body: unknown; headers: Record<string, string> };
+\`\`\`
 
 ## Style
 - Keep it small. Idiomatic TS. Named helper functions are fine.
 - Use \`ctx.log\` at key decision points so failures are diagnosable.
 - Use \`ctx.state\` for any cross-run memory.
 - Use \`ctx.secret("NAME")\` for API keys, not hardcoded strings.
-- Lean on the inferred type for narrowing instead of adding defensive runtime guards for fields the type already guarantees.
 - No console.log. No try/catch around the whole function — let errors propagate.
 
 ## Delivery
 You must call the \`emit_workflow\` tool EXACTLY ONCE with the full module source plus a one-sentence summary. Do NOT write files via bash or any other tool — emit_workflow is the only way to deliver.
 
-The emitted source is type-checked against the Ctx interface and the inferred WorkflowEvent type before it's accepted. The \`ctx.secret\` parameter is narrowed to the project's actual secret names (listed below), so a typo or an unknown name is a TS error. If emit_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_workflow again with the corrected source.`;
+The emitted source is type-checked against the Ctx interface before it's accepted. The \`ctx.secret\` parameter is narrowed to the project's actual secret names (listed below), so a typo or an unknown name is a TS error. If emit_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_workflow again with the corrected source.`;
 
 const EXPORT_DEFAULT_RE =
 	/export\s+default\s+(async\s+function|function\s+\w*\s*\(|(async\s+)?\([^)]*\)\s*=>|(async\s+)?[A-Za-z_$][\w$]*\s*=>)/;
@@ -110,22 +114,11 @@ function validateSource(source: string): { ok: true } | { ok: false; error: stri
 	return { ok: true };
 }
 
-function buildUserMessage(
-	opts: GenerateWorkflowOptions,
-	secretNames: string[],
-	workflowEventTypeTs: string | null
-): string {
+function buildUserMessage(opts: GenerateWorkflowOptions, secretNames: string[]): string {
 	const trigger = formatTrigger(opts.triggerType, opts.cronExpr ?? null);
 	const lines = [
 		`Workflow name: ${opts.name}`,
 		`Trigger: ${trigger}`,
-		'',
-		'## WorkflowEvent type (inferred from historical webhook payloads, ambient)',
-		'```ts',
-		workflowEventTypeTs && workflowEventTypeTs.trim().length > 0
-			? workflowEventTypeTs
-			: 'type WorkflowEvent = { body: unknown; headers: { [key: string]: string | undefined } };',
-		'```',
 		'',
 		'## Available secrets (via ctx.secret)',
 		secretNames.length === 0
@@ -152,8 +145,7 @@ class EmitSuccess {
 function makeEmitTool(
 	state: { attempts: number; emitted: EmittedPayload | null },
 	maxAttempts: number,
-	secretNames: readonly string[],
-	workflowEventTypeTs: string | null
+	secretNames: readonly string[]
 ): Tool {
 	return {
 		description:
@@ -196,7 +188,7 @@ function makeEmitTool(
 				}
 				throw new Error(`${validation.error}. Fix the source and call emit_workflow again.`);
 			}
-			const tc = typecheckWorkflow(secretNames, source, workflowEventTypeTs);
+			const tc = typecheckWorkflow(secretNames, source);
 			if (!tc.ok) {
 				const details = tc.diagnostics.join('\n');
 				if (state.attempts >= maxAttempts) {
@@ -240,12 +232,11 @@ export async function generateWorkflow(
 	}
 	const secretMetas = await listSecretNamesForProject(preWorkflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
-	const workflowEventTypeTs = preWorkflow.inferredEventTypeTs;
-	const userMessage = buildUserMessage(opts, secretNames, workflowEventTypeTs);
+	const userMessage = buildUserMessage(opts, secretNames);
 
 	// Wrap the emit tool so that on a successful emit, we capture the payload
 	// And abort the agent loop to return promptly.
-	const rawEmitTool = makeEmitTool(emitState, maxEmitAttempts, secretNames, workflowEventTypeTs);
+	const rawEmitTool = makeEmitTool(emitState, maxEmitAttempts, secretNames);
 	const emitTool: Tool = {
 		...rawEmitTool,
 		async run(input, ctx) {
