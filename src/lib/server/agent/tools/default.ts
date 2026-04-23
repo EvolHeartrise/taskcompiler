@@ -226,8 +226,11 @@ const bash: Tool<BashInput, BashResult> = {
 			}
 		};
 		if (ctx.abortSignal) {
-			if (ctx.abortSignal.aborted) onAbort();
-			else ctx.abortSignal.addEventListener('abort', onAbort, { once: true });
+			if (ctx.abortSignal.aborted) {
+				onAbort();
+			} else {
+				ctx.abortSignal.addEventListener('abort', onAbort, { once: true });
+			}
 		}
 
 		const [stdoutText, stderrText, exitCode] = await Promise.all([

@@ -99,7 +99,9 @@ interface OAIResponse {
 }
 
 function truncate(s: string, max: number): string {
-	if (s.length <= max) return s;
+	if (s.length <= max) {
+		return s;
+	}
 	return s.slice(0, max) + `… [+${s.length - max} chars]`;
 }
 
@@ -154,14 +156,18 @@ function toOAIMessages(system: string | undefined, msgs: AgentMessage[]): OAIMes
 		}
 		const msg: OAIMessage = { role: 'assistant' };
 		msg.content = textParts.length > 0 ? textParts.join('\n') : null;
-		if (toolCalls.length > 0) msg.tool_calls = toolCalls;
+		if (toolCalls.length > 0) {
+			msg.tool_calls = toolCalls;
+		}
 		out.push(msg);
 	}
 	return out;
 }
 
 function toOAITools(tools: AgentTool[] | undefined): OAITool[] | undefined {
-	if (!tools || tools.length === 0) return undefined;
+	if (!tools || tools.length === 0) {
+		return undefined;
+	}
 	return tools.map((t) => ({
 		type: 'function',
 		function: {
@@ -173,7 +179,9 @@ function toOAITools(tools: AgentTool[] | undefined): OAITool[] | undefined {
 }
 
 function parseToolArguments(raw: string): unknown {
-	if (!raw || raw.length === 0) return {};
+	if (!raw || raw.length === 0) {
+		return {};
+	}
 	try {
 		return JSON.parse(raw);
 	} catch {
@@ -226,9 +234,15 @@ export async function createMessage(
 	const gatewayName = env.CLOUDFLARE_GATEWAY_NAME;
 
 	const missing: string[] = [];
-	if (!cfToken) missing.push('CLOUDFLARE_API_TOKEN');
-	if (!accountId) missing.push('CLOUDFLARE_ACCOUNT_ID');
-	if (!gatewayName) missing.push('CLOUDFLARE_GATEWAY_NAME');
+	if (!cfToken) {
+		missing.push('CLOUDFLARE_API_TOKEN');
+	}
+	if (!accountId) {
+		missing.push('CLOUDFLARE_ACCOUNT_ID');
+	}
+	if (!gatewayName) {
+		missing.push('CLOUDFLARE_GATEWAY_NAME');
+	}
 	if (missing.length > 0) {
 		throw new Error(`AI Gateway is misconfigured: missing ${missing.join(', ')} in env bindings.`);
 	}
@@ -241,8 +255,12 @@ export async function createMessage(
 		max_tokens: body.max_tokens
 	};
 	const oaiTools = toOAITools(body.tools);
-	if (oaiTools) oaiBody.tools = oaiTools;
-	if (body.temperature !== undefined) oaiBody.temperature = body.temperature;
+	if (oaiTools) {
+		oaiBody.tools = oaiTools;
+	}
+	if (body.temperature !== undefined) {
+		oaiBody.temperature = body.temperature;
+	}
 
 	const res = await fetch(url, {
 		method: 'POST',

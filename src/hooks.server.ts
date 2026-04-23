@@ -4,10 +4,18 @@ import { auth } from '$lib/server/auth';
 
 // Routes that stay accessible without a session. Everything else requires auth.
 function isPublic(pathname: string): boolean {
-	if (pathname === '/auth' || pathname.startsWith('/auth/')) return true;
-	if (pathname.startsWith('/api/auth/')) return true;
-	if (pathname.startsWith('/hook/')) return true; // webhook endpoints are external
-	if (pathname === '/api/dev/cron-tick') return true; // dev-only trigger
+	if (pathname === '/auth' || pathname.startsWith('/auth/')) {
+		return true;
+	}
+	if (pathname.startsWith('/api/auth/')) {
+		return true;
+	}
+	if (pathname.startsWith('/hook/')) {
+		return true;
+	} // webhook endpoints are external
+	if (pathname === '/api/dev/cron-tick') {
+		return true;
+	} // dev-only trigger
 	return false;
 }
 

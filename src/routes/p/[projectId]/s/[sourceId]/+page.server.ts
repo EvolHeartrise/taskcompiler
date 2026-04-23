@@ -71,16 +71,16 @@ export const actions: Actions = {
 			for (const w of workflows) {
 				try {
 					await tearDownWorkflow(w.id);
-				} catch (error) {
+				} catch (err) {
 					console.error('[source-delete] tearDownWorkflow failed', {
-						error: error instanceof Error ? error.message : String(error),
+						error: err instanceof Error ? err.message : String(err),
 						workflowId: w.id
 					});
 				}
 			}
 			await deleteEventSource(source.id);
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			return fail(500, { delete: { error: `Delete failed: ${msg}` } });
 		}
 		redirect(303, `/p/${params.projectId}`);

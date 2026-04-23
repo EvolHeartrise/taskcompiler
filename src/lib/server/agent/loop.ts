@@ -46,7 +46,9 @@ function defaultWorkingDir(): string {
 function extractText(content: ContentBlock[]): string {
 	const parts: string[] = [];
 	for (const block of content) {
-		if (block.type === 'text') parts.push(block.text);
+		if (block.type === 'text') {
+			parts.push(block.text);
+		}
 	}
 	return parts.join('');
 }
@@ -63,7 +65,9 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 	};
 
 	const toolsByName = new Map<string, Tool>();
-	for (const t of opts.tools) toolsByName.set(t.name, t);
+	for (const t of opts.tools) {
+		toolsByName.set(t.name, t);
+	}
 	const toolDefs: AgentTool[] | undefined =
 		opts.tools.length > 0 ? opts.tools.map(toolToAgentDefinition) : undefined;
 

@@ -49,8 +49,8 @@ export const actions: Actions = {
 		try {
 			const project = await createProject({ name, userId: locals.user.id });
 			newId = project.id;
-		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
 			return fail(500, { create: { error: msg } });
 		}
 		// The project layout writes the "last visited" cookie on entry, so we

@@ -6,7 +6,7 @@ export interface ErrorShape {
 
 function safeStringify(v: unknown): string {
 	try {
-		return typeof v === "string" ? v : JSON.stringify(v);
+		return typeof v === 'string' ? v : JSON.stringify(v);
 	} catch {
 		return String(v);
 	}
@@ -15,23 +15,24 @@ function safeStringify(v: unknown): string {
 export function toErrorShape(err: unknown): ErrorShape {
 	if (err instanceof Error) {
 		const out: ErrorShape = {
-			name: err.name || "Error",
-			message: err.message || String(err),
+			name: err.name || 'Error',
+			message: err.message || String(err)
 		};
-		if (err.stack) out.stack = err.stack;
+		if (err.stack) {
+			out.stack = err.stack;
+		}
 		return out;
 	}
-	if (typeof err === "object" && err !== null) {
+	if (typeof err === 'object' && err !== null) {
 		const anyErr = err as { name?: unknown; message?: unknown; stack?: unknown };
 		const out: ErrorShape = {
-			name: typeof anyErr.name === "string" ? anyErr.name : "NonError",
-			message:
-				typeof anyErr.message === "string"
-					? anyErr.message
-					: safeStringify(err),
+			name: typeof anyErr.name === 'string' ? anyErr.name : 'NonError',
+			message: typeof anyErr.message === 'string' ? anyErr.message : safeStringify(err)
 		};
-		if (typeof anyErr.stack === "string") out.stack = anyErr.stack;
+		if (typeof anyErr.stack === 'string') {
+			out.stack = anyErr.stack;
+		}
 		return out;
 	}
-	return { name: "NonError", message: safeStringify(err) };
+	return { name: 'NonError', message: safeStringify(err) };
 }

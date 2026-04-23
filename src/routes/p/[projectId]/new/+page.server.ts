@@ -80,8 +80,8 @@ export const actions: Actions = {
 				projectId,
 				prompt
 			});
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
 			return fail(500, { error: `Could not create workflow: ${message}`, values });
 		}
 
@@ -95,8 +95,8 @@ export const actions: Actions = {
 					workflowId
 				}
 			});
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
 			return fail(500, {
 				error: `Could not start generation workflow: ${message}`,
 				values

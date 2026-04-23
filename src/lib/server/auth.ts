@@ -79,7 +79,9 @@ export function auth(): Auth {
 	const env = getEnv();
 	// Memoize per-isolate while bindings are stable. Workers reuse isolates so
 	// the identity check keeps us from reconstructing Better Auth every request.
-	if (cached && cached.env === env) return cached.auth;
+	if (cached && cached.env === env) {
+		return cached.auth;
+	}
 	cached = { env, auth: buildAuth(env) };
 	return cached.auth;
 }
