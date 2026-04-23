@@ -12,10 +12,6 @@ interface WorkflowRow {
 	updated_at: number;
 }
 
-function rowToWorkflow(row: WorkflowRow): Workflow {
-	return mapRow<Workflow>(row);
-}
-
 export interface CreateWorkflowInput {
 	id?: string;
 	projectId: string;
@@ -53,7 +49,7 @@ export async function getWorkflow(id: string): Promise<Workflow | null> {
 		.prepare(`SELECT * FROM workflows WHERE id = ?`)
 		.bind(id)
 		.first<WorkflowRow>();
-	return row ? rowToWorkflow(row) : null;
+	return row ? mapRow<Workflow>(row) : null;
 }
 
 export async function getWorkflowForProject(
@@ -64,7 +60,7 @@ export async function getWorkflowForProject(
 		.prepare(`SELECT * FROM workflows WHERE id = ? AND project_id = ?`)
 		.bind(id, projectId)
 		.first<WorkflowRow>();
-	return row ? rowToWorkflow(row) : null;
+	return row ? mapRow<Workflow>(row) : null;
 }
 
 export async function listWorkflowsForProject(projectId: string): Promise<Workflow[]> {
@@ -72,7 +68,7 @@ export async function listWorkflowsForProject(projectId: string): Promise<Workfl
 		.prepare(`SELECT * FROM workflows WHERE project_id = ? ORDER BY created_at DESC`)
 		.bind(projectId)
 		.all<WorkflowRow>();
-	return res.results.map(rowToWorkflow);
+	return res.results.map((r) => mapRow<Workflow>(r));
 }
 
 export async function listWorkflowsForEventSource(eventSourceId: string): Promise<Workflow[]> {
@@ -80,7 +76,7 @@ export async function listWorkflowsForEventSource(eventSourceId: string): Promis
 		.prepare(`SELECT * FROM workflows WHERE event_source_id = ? ORDER BY created_at DESC`)
 		.bind(eventSourceId)
 		.all<WorkflowRow>();
-	return res.results.map(rowToWorkflow);
+	return res.results.map((r) => mapRow<Workflow>(r));
 }
 
 // Batched workflow counts per source for a project — one query instead of N

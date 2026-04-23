@@ -9,10 +9,6 @@ interface ProjectRow {
 	updated_at: number;
 }
 
-function rowToProject(row: ProjectRow): Project {
-	return mapRow<Project>(row);
-}
-
 export interface CreateProjectInput {
 	id?: string;
 	userId: string;
@@ -43,7 +39,7 @@ export async function listProjectsForUser(userId: string): Promise<Project[]> {
 		.prepare(`SELECT * FROM projects WHERE user_id = ? ORDER BY created_at ASC`)
 		.bind(userId)
 		.all<ProjectRow>();
-	return res.results.map(rowToProject);
+	return res.results.map((r) => mapRow<Project>(r));
 }
 
 export async function getProjectForUser(id: string, userId: string): Promise<Project | null> {
@@ -51,7 +47,7 @@ export async function getProjectForUser(id: string, userId: string): Promise<Pro
 		.prepare(`SELECT * FROM projects WHERE id = ? AND user_id = ?`)
 		.bind(id, userId)
 		.first<ProjectRow>();
-	return row ? rowToProject(row) : null;
+	return row ? mapRow<Project>(row) : null;
 }
 
 // System-level lookup. Used by ctx-rendering paths (e.g. WFP binding) where
@@ -61,7 +57,7 @@ export async function getProject(id: string): Promise<Project | null> {
 		.prepare(`SELECT * FROM projects WHERE id = ?`)
 		.bind(id)
 		.first<ProjectRow>();
-	return row ? rowToProject(row) : null;
+	return row ? mapRow<Project>(row) : null;
 }
 
 export async function renameProject(

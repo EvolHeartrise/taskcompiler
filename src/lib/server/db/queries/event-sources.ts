@@ -12,10 +12,6 @@ interface EventSourceRow {
 	last_fired_at: number;
 }
 
-function rowToEventSource(row: EventSourceRow): EventSource {
-	return mapRow<EventSource>(row);
-}
-
 export interface CreateEventSourceInput {
 	id?: string;
 	projectId: string;
@@ -55,7 +51,7 @@ export async function getEventSource(id: string): Promise<EventSource | null> {
 		.prepare(`SELECT * FROM event_sources WHERE id = ?`)
 		.bind(id)
 		.first<EventSourceRow>();
-	return row ? rowToEventSource(row) : null;
+	return row ? mapRow<EventSource>(row) : null;
 }
 
 export async function getEventSourceForProject(
@@ -66,7 +62,7 @@ export async function getEventSourceForProject(
 		.prepare(`SELECT * FROM event_sources WHERE id = ? AND project_id = ?`)
 		.bind(id, projectId)
 		.first<EventSourceRow>();
-	return row ? rowToEventSource(row) : null;
+	return row ? mapRow<EventSource>(row) : null;
 }
 
 export async function listEventSourcesForProject(projectId: string): Promise<EventSource[]> {
@@ -74,7 +70,7 @@ export async function listEventSourcesForProject(projectId: string): Promise<Eve
 		.prepare(`SELECT * FROM event_sources WHERE project_id = ? ORDER BY created_at DESC`)
 		.bind(projectId)
 		.all<EventSourceRow>();
-	return res.results.map(rowToEventSource);
+	return res.results.map((r) => mapRow<EventSource>(r));
 }
 
 export async function listCronEventSources(): Promise<EventSource[]> {
@@ -85,7 +81,7 @@ export async function listCronEventSources(): Promise<EventSource[]> {
 			 ORDER BY last_fired_at ASC`
 		)
 		.all<EventSourceRow>();
-	return res.results.map(rowToEventSource);
+	return res.results.map((r) => mapRow<EventSource>(r));
 }
 
 export async function markEventSourceFired(sourceId: string, ts: number): Promise<void> {

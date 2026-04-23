@@ -19,13 +19,17 @@ export function parseJson<T>(s: string | null): T | null {
 	return JSON.parse(s) as T;
 }
 
-// Convert a snake_case row from D1 to its camelCase domain shape. Callers
-// Cast the return to the target type; tables with JSON fields or boolean
-// Coercions keep a hand-written mapper that delegates here for the plain
-// Columns and layers the custom fields on top.
-export function mapRow<T>(row: object): T {
+// Convert a snake_case row from D1 to its camelCase domain shape. Pass
+// `skip` to exclude columns the caller will layer on top (JSON-decoded or
+// boolean-coerced fields); the returned object is cast to the caller's
+// Omit<T, ...> type.
+export function mapRow<T>(row: object, skip: readonly string[] = []): T {
+	const skipSet = new Set(skip);
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(row)) {
+		if (skipSet.has(key)) {
+			continue;
+		}
 		let camel = '';
 		let capitalize = false;
 		for (const ch of key) {

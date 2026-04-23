@@ -13,10 +13,6 @@ interface WorkflowVersionRow {
 	healed_from_run_id: string | null;
 }
 
-function rowToVersion(row: WorkflowVersionRow): WorkflowVersion {
-	return mapRow<WorkflowVersion>(row);
-}
-
 export interface CreateVersionInput {
 	workflowId: string;
 	sourceTs: string;
@@ -87,7 +83,7 @@ export async function getVersion(id: string): Promise<WorkflowVersion | null> {
 		.prepare(`SELECT * FROM workflow_versions WHERE id = ?`)
 		.bind(id)
 		.first<WorkflowVersionRow>();
-	return row ? rowToVersion(row) : null;
+	return row ? mapRow<WorkflowVersion>(row) : null;
 }
 
 export async function getCurrentVersion(workflowId: string): Promise<WorkflowVersion | null> {
@@ -99,7 +95,7 @@ export async function getCurrentVersion(workflowId: string): Promise<WorkflowVer
 		)
 		.bind(workflowId)
 		.first<WorkflowVersionRow>();
-	return row ? rowToVersion(row) : null;
+	return row ? mapRow<WorkflowVersion>(row) : null;
 }
 
 export async function listVersions(workflowId: string): Promise<WorkflowVersion[]> {
@@ -107,5 +103,5 @@ export async function listVersions(workflowId: string): Promise<WorkflowVersion[
 		.prepare(`SELECT * FROM workflow_versions WHERE workflow_id = ? ORDER BY version ASC`)
 		.bind(workflowId)
 		.all<WorkflowVersionRow>();
-	return res.results.map(rowToVersion);
+	return res.results.map((r) => mapRow<WorkflowVersion>(r));
 }
