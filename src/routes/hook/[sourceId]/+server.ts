@@ -58,12 +58,14 @@ function fanoutResponse(res: ExecuteSourceEventResult): Response {
 	);
 }
 
-export const POST: RequestHandler = async ({ params, request }) => {
-	const { sourceId } = params;
+async function handle(
+	sourceId: string | undefined,
+	headers: Headers,
+	extractPayload: () => Promise<{ ok: true; payload: unknown } | { ok: false }>
+): Promise<Response> {
 	if (!sourceId) {
 		return errorJson(400, 'missing sourceId');
 	}
-
 	const source = await getEventSource(sourceId);
 	if (!source) {
 		return errorJson(404, 'event source not found');
@@ -71,17 +73,15 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	if (source.triggerType !== 'webhook') {
 		return errorJson(400, `event source trigger is '${source.triggerType}', not 'webhook'`);
 	}
-
-	const parsed = await parseBody(request);
+	const parsed = await extractPayload();
 	if (!parsed.ok) {
 		return errorJson(400, 'invalid request body');
 	}
-
 	try {
 		const res = await ingestWebhookEvent({
 			eventSourceId: source.id,
 			payload: parsed.payload,
-			rawHeaders: request.headers
+			rawHeaders: headers
 		});
 		return fanoutResponse(res);
 	} catch (error) {
@@ -91,39 +91,16 @@ export const POST: RequestHandler = async ({ params, request }) => {
 			{ status: 500 }
 		);
 	}
-};
+}
 
-export const GET: RequestHandler = async ({ params, request, url }) => {
-	const { sourceId } = params;
-	if (!sourceId) {
-		return errorJson(400, 'missing sourceId');
-	}
+export const POST: RequestHandler = ({ params, request }) =>
+	handle(params.sourceId, request.headers, () => parseBody(request));
 
-	const source = await getEventSource(sourceId);
-	if (!source) {
-		return errorJson(404, 'event source not found');
-	}
-	if (source.triggerType !== 'webhook') {
-		return errorJson(400, `event source trigger is '${source.triggerType}', not 'webhook'`);
-	}
-
-	const payload: Record<string, string> = {};
-	for (const [k, v] of url.searchParams.entries()) {
-		payload[k] = v;
-	}
-
-	try {
-		const res = await ingestWebhookEvent({
-			eventSourceId: source.id,
-			payload,
-			rawHeaders: request.headers
-		});
-		return fanoutResponse(res);
-	} catch (error) {
-		const e = error as Error;
-		return json(
-			{ error: { message: e.message ?? String(error), name: e.name ?? 'Error' } },
-			{ status: 500 }
-		);
-	}
-};
+export const GET: RequestHandler = ({ params, request, url }) =>
+	handle(params.sourceId, request.headers, () => {
+		const payload: Record<string, string> = {};
+		for (const [k, v] of url.searchParams.entries()) {
+			payload[k] = v;
+		}
+		return Promise.resolve({ ok: true, payload });
+	});
