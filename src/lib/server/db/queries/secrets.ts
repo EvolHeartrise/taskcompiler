@@ -1,28 +1,23 @@
-import { getDb, now } from '../index.ts';
+import { getDb, mapRow, now } from '../index.ts';
 import type { ProjectSecret, ProjectSecretMeta } from '../types.ts';
 
-interface ProjectSecretRow {
+interface ProjectSecretMetaRow {
 	project_id: string;
 	name: string;
-	value: string;
 	created_at: number;
 	updated_at: number;
 }
 
-function rowToMeta(row: ProjectSecretRow): ProjectSecretMeta {
-	return {
-		createdAt: row.created_at,
-		name: row.name,
-		projectId: row.project_id,
-		updatedAt: row.updated_at
-	};
+interface ProjectSecretRow extends ProjectSecretMetaRow {
+	value: string;
+}
+
+function rowToMeta(row: ProjectSecretMetaRow): ProjectSecretMeta {
+	return mapRow<ProjectSecretMeta>(row);
 }
 
 function rowToSecret(row: ProjectSecretRow): ProjectSecret {
-	return {
-		...rowToMeta(row),
-		value: row.value
-	};
+	return mapRow<ProjectSecret>(row);
 }
 
 const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -34,11 +29,11 @@ export function isValidSecretName(name: string): boolean {
 export async function listSecretNamesForProject(projectId: string): Promise<ProjectSecretMeta[]> {
 	const res = await getDb()
 		.prepare(
-			`SELECT project_id, name, '' AS value, created_at, updated_at
+			`SELECT project_id, name, created_at, updated_at
 			 FROM project_secrets WHERE project_id = ? ORDER BY name ASC`
 		)
 		.bind(projectId)
-		.all<ProjectSecretRow>();
+		.all<ProjectSecretMetaRow>();
 	return res.results.map(rowToMeta);
 }
 
@@ -75,11 +70,11 @@ export async function upsertSecret(
 		.run();
 	const row = await getDb()
 		.prepare(
-			`SELECT project_id, name, '' AS value, created_at, updated_at
+			`SELECT project_id, name, created_at, updated_at
 			 FROM project_secrets WHERE project_id = ? AND name = ?`
 		)
 		.bind(projectId, name)
-		.first<ProjectSecretRow>();
+		.first<ProjectSecretMetaRow>();
 	if (!row) {
 		throw new Error(`upsertSecret: row missing after upsert (project=${projectId}, name=${name})`);
 	}

@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
 import type { Workflow } from '../types.ts';
 
 interface WorkflowRow {
@@ -13,16 +13,7 @@ interface WorkflowRow {
 }
 
 function rowToWorkflow(row: WorkflowRow): Workflow {
-	return {
-		createdAt: row.created_at,
-		currentVersionId: row.current_version_id,
-		eventSourceId: row.event_source_id,
-		id: row.id,
-		name: row.name,
-		projectId: row.project_id,
-		prompt: row.prompt,
-		updatedAt: row.updated_at
-	};
+	return mapRow<Workflow>(row);
 }
 
 export interface CreateWorkflowInput {

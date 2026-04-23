@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
 import type { VersionCreatedBy, WorkflowVersion } from '../types.ts';
 
 interface WorkflowVersionRow {
@@ -14,17 +14,7 @@ interface WorkflowVersionRow {
 }
 
 function rowToVersion(row: WorkflowVersionRow): WorkflowVersion {
-	return {
-		createdAt: row.created_at,
-		createdBy: row.created_by,
-		deployPath: row.deploy_path,
-		healedFromRunId: row.healed_from_run_id,
-		id: row.id,
-		parentVersionId: row.parent_version_id,
-		sourceTs: row.source_ts,
-		version: row.version,
-		workflowId: row.workflow_id
-	};
+	return mapRow<WorkflowVersion>(row);
 }
 
 export interface CreateVersionInput {

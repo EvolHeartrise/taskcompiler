@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
 import type { EventSource, TriggerType } from '../types.ts';
 
 interface EventSourceRow {
@@ -13,16 +13,7 @@ interface EventSourceRow {
 }
 
 function rowToEventSource(row: EventSourceRow): EventSource {
-	return {
-		createdAt: row.created_at,
-		cronExpr: row.cron_expr,
-		id: row.id,
-		lastFiredAt: row.last_fired_at,
-		name: row.name,
-		projectId: row.project_id,
-		triggerType: row.trigger_type,
-		updatedAt: row.updated_at
-	};
+	return mapRow<EventSource>(row);
 }
 
 export interface CreateEventSourceInput {

@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
 import type { Project } from '../types.ts';
 
 interface ProjectRow {
@@ -10,13 +10,7 @@ interface ProjectRow {
 }
 
 function rowToProject(row: ProjectRow): Project {
-	return {
-		createdAt: row.created_at,
-		id: row.id,
-		name: row.name,
-		updatedAt: row.updated_at,
-		userId: row.user_id
-	};
+	return mapRow<Project>(row);
 }
 
 export interface CreateProjectInput {
