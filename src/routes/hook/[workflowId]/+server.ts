@@ -1,34 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { executeExistingEvent } from '$lib/server/engine';
-import { claimAwaitingForGeneration, getWorkflow } from '$lib/server/db/queries/workflows';
-import type { Workflow } from '$lib/server/db/types';
+import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { ingestWebhookEvent } from '$lib/server/webhooks/ingest';
 
 type ExecResponse = Awaited<ReturnType<typeof executeExistingEvent>>;
-
-async function maybeKickGeneration(
-	wf: Workflow,
-	platform: App.Platform | undefined
-): Promise<void> {
-	if (wf.status !== 'awaiting_first_event' || !platform) {
-		return;
-	}
-	const claimed = await claimAwaitingForGeneration(wf.id);
-	if (!claimed) {
-		return;
-	}
-	await platform.env.GEN_WORKFLOW.create({
-		id: `gen-${wf.id}`,
-		params: {
-			cronExpr: wf.cronExpr,
-			name: wf.name,
-			prompt: wf.prompt,
-			triggerType: wf.triggerType,
-			workflowId: wf.id
-		}
-	});
-}
 
 function errorJson(status: number, message: string): Response {
 	return json({ error: { message, name: 'TriggerError' } }, { status });
@@ -77,14 +53,14 @@ function executedResponse(res: ExecResponse): Response {
 	return json(body, { status: 200 });
 }
 
-function pendingResponse(eventId: string, isNewShape: boolean): Response {
-	// 202 Accepted: event captured for shape inference; workflow isn't ready
-	// To execute yet (no current version). Phase 3 will trigger generation
-	// Here when status === 'awaiting_first_event'.
-	return json({ eventId, isNewShape, status: 'pending' as const }, { status: 202 });
+function pendingResponse(eventId: string): Response {
+	// 202 Accepted: event captured but workflow isn't ready to execute (no
+	// Current version yet — generation hasn't completed). The event will be
+	// Available for replay once generation lands.
+	return json({ eventId, status: 'pending' as const }, { status: 202 });
 }
 
-export const POST: RequestHandler = async ({ params, platform, request }) => {
+export const POST: RequestHandler = async ({ params, request }) => {
 	const { workflowId } = params;
 	if (!workflowId) {
 		return errorJson(400, 'missing workflowId');
@@ -110,10 +86,8 @@ export const POST: RequestHandler = async ({ params, platform, request }) => {
 			workflowId
 		});
 
-		await maybeKickGeneration(wf, platform);
-
 		if (!wf.currentVersionId) {
-			return pendingResponse(ingest.event.id, ingest.isNewShape);
+			return pendingResponse(ingest.event.id);
 		}
 
 		const res = await executeExistingEvent(ingest.event.id);
@@ -127,7 +101,7 @@ export const POST: RequestHandler = async ({ params, platform, request }) => {
 	}
 };
 
-export const GET: RequestHandler = async ({ params, platform, request, url }) => {
+export const GET: RequestHandler = async ({ params, request, url }) => {
 	const { workflowId } = params;
 	if (!workflowId) {
 		return errorJson(400, 'missing workflowId');
@@ -153,10 +127,8 @@ export const GET: RequestHandler = async ({ params, platform, request, url }) =>
 			workflowId
 		});
 
-		await maybeKickGeneration(wf, platform);
-
 		if (!wf.currentVersionId) {
-			return pendingResponse(ingest.event.id, ingest.isNewShape);
+			return pendingResponse(ingest.event.id);
 		}
 
 		const res = await executeExistingEvent(ingest.event.id);
