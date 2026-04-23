@@ -1,23 +1,11 @@
 import { getDb, mapRow, now } from '../index.ts';
-import type { ProjectSecret, ProjectSecretMeta } from '../types.ts';
+import type { ProjectSecretMeta } from '../types.ts';
 
 interface ProjectSecretMetaRow {
 	project_id: string;
 	name: string;
 	created_at: number;
 	updated_at: number;
-}
-
-interface ProjectSecretRow extends ProjectSecretMetaRow {
-	value: string;
-}
-
-function rowToMeta(row: ProjectSecretMetaRow): ProjectSecretMeta {
-	return mapRow<ProjectSecretMeta>(row);
-}
-
-function rowToSecret(row: ProjectSecretRow): ProjectSecret {
-	return mapRow<ProjectSecret>(row);
 }
 
 const NAME_RE = /^[A-Z][A-Z0-9_]{0,63}$/;
@@ -34,18 +22,7 @@ export async function listSecretNamesForProject(projectId: string): Promise<Proj
 		)
 		.bind(projectId)
 		.all<ProjectSecretMetaRow>();
-	return res.results.map(rowToMeta);
-}
-
-export async function getSecretsForProject(projectId: string): Promise<ProjectSecret[]> {
-	const res = await getDb()
-		.prepare(
-			`SELECT project_id, name, value, created_at, updated_at
-			 FROM project_secrets WHERE project_id = ? ORDER BY name ASC`
-		)
-		.bind(projectId)
-		.all<ProjectSecretRow>();
-	return res.results.map(rowToSecret);
+	return res.results.map((row) => mapRow<ProjectSecretMeta>(row));
 }
 
 export async function upsertSecret(
@@ -78,7 +55,7 @@ export async function upsertSecret(
 	if (!row) {
 		throw new Error(`upsertSecret: row missing after upsert (project=${projectId}, name=${name})`);
 	}
-	return rowToMeta(row);
+	return mapRow<ProjectSecretMeta>(row);
 }
 
 export async function deleteSecret(projectId: string, name: string): Promise<void> {
