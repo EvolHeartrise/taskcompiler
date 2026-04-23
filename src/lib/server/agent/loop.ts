@@ -23,7 +23,6 @@ export interface AgentRunOptions {
 	tools: Tool[];
 	maxTurns?: number;
 	onEvent?: (e: AgentEvent) => void;
-	workingDir?: string;
 	abortSignal?: AbortSignal;
 }
 
@@ -34,13 +33,6 @@ export interface AgentRunResult {
 	transcript: AgentEvent[];
 	stopReason: StopReason;
 	turns: number;
-}
-
-function defaultWorkingDir(): string {
-	if (typeof process !== 'undefined' && typeof process.cwd === 'function') {
-		return process.cwd();
-	}
-	return '/';
 }
 
 function extractText(content: ContentBlock[]): string {
@@ -56,7 +48,6 @@ function extractText(content: ContentBlock[]): string {
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 	const model = opts.model ?? DEFAULT_MODEL;
 	const maxTurns = opts.maxTurns ?? 40;
-	const workingDir = opts.workingDir ?? defaultWorkingDir();
 	const transcript: AgentEvent[] = [];
 
 	const emit = (e: AgentEvent) => {
@@ -72,7 +63,6 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 		opts.tools.length > 0 ? opts.tools.map(toolToAgentDefinition) : undefined;
 
 	const ctx: ToolCtx = {
-		workingDir,
 		abortSignal: opts.abortSignal,
 		log: () => {
 			// no-op by default; callers wire logging via onEvent

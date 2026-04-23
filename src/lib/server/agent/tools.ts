@@ -1,7 +1,6 @@
 import type { AgentTool } from './ai-gateway.ts';
 
 export interface ToolCtx {
-	workingDir: string;
 	abortSignal?: AbortSignal;
 	log: (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
 }
