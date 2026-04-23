@@ -72,7 +72,7 @@ async function withDbRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
 		} catch (error) {
 			lastErr = error;
 			if (i < DB_MAX_ATTEMPTS - 1) {
-				const delay = DB_BASE_DELAY_MS * Math.pow(3, i);
+				const delay = DB_BASE_DELAY_MS * 3 ** i;
 				console.warn(
 					`[executor] D1 transient error on ${label} (attempt ${i + 1}), retrying in ${delay}ms`,
 					{
@@ -90,14 +90,20 @@ async function dispatchOnce(args: {
 	deployPath: string;
 	workflowId: string;
 	workflowName: string;
-	event: { id: string; triggerType: EventTriggerType; receivedAt: number; payload: unknown };
+	event: {
+		id: string;
+		triggerType: EventTriggerType;
+		receivedAt: number;
+		payload: unknown;
+		headers: Record<string, string>;
+	};
 }): Promise<DispatchOutcome> {
 	const env = getEnv();
 	try {
 		const response = await env.DISPATCHER.get(args.deployPath).fetch('https://workflow.invoke/', {
 			body: JSON.stringify({
-				workflow: { id: args.workflowId, name: args.workflowName },
-				event: args.event
+				event: args.event,
+				workflow: { id: args.workflowId, name: args.workflowName }
 			}),
 			headers: { 'content-type': 'application/json' },
 			method: 'POST'
@@ -147,7 +153,13 @@ async function dispatchWithRetry(args: {
 	deployPath: string;
 	workflowId: string;
 	workflowName: string;
-	event: { id: string; triggerType: EventTriggerType; receivedAt: number; payload: unknown };
+	event: {
+		id: string;
+		triggerType: EventTriggerType;
+		receivedAt: number;
+		payload: unknown;
+		headers: Record<string, string>;
+	};
 }): Promise<DispatchOutcome> {
 	let last: DispatchOutcome | null = null;
 	for (let i = 0; i < DISPATCH_MAX_ATTEMPTS; i++) {
@@ -218,6 +230,7 @@ export async function executeExistingEvent(
 		const outcome = await dispatchWithRetry({
 			deployPath: version.deployPath,
 			event: {
+				headers: event.headers,
 				id: event.id,
 				payload: event.payload,
 				receivedAt: event.receivedAt,
@@ -289,7 +302,7 @@ export async function executeExistingEvent(
 					}
 				});
 			} catch (error) {
-				console.error('failed to start HEAL_WORKFLOW for runId=' + run.id, error);
+				console.error(`failed to start HEAL_WORKFLOW for runId=${run.id}`, error);
 			}
 		}
 		return {

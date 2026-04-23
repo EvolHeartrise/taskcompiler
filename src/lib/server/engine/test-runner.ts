@@ -88,6 +88,7 @@ export async function runAgainstEventEphemeral(
 			response = await env.DISPATCHER.get(scriptName).fetch('https://workflow.invoke/', {
 				body: JSON.stringify({
 					event: {
+						headers: event.headers,
 						id: event.id,
 						payload: event.payload,
 						receivedAt: event.receivedAt,

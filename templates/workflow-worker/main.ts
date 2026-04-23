@@ -9,6 +9,7 @@ interface InvokePayload {
 		triggerType: 'webhook' | 'cron' | 'manual' | 'replay';
 		receivedAt: number;
 		payload: unknown;
+		headers: Record<string, string>;
 	};
 }
 
@@ -44,6 +45,7 @@ function isInvokePayload(value: unknown): value is InvokePayload {
 		id?: unknown;
 		triggerType?: unknown;
 		receivedAt?: unknown;
+		headers?: unknown;
 	};
 	if (typeof wf.id !== 'string' || typeof wf.name !== 'string') {
 		return false;
@@ -60,6 +62,9 @@ function isInvokePayload(value: unknown): value is InvokePayload {
 		ev.triggerType !== 'manual' &&
 		ev.triggerType !== 'replay'
 	) {
+		return false;
+	}
+	if (!ev.headers || typeof ev.headers !== 'object') {
 		return false;
 	}
 	return true;
@@ -92,14 +97,14 @@ export default {
 			}
 			const secrets = await loadSecrets(env);
 			const ctx = buildCtx(env, body, logs, secrets);
-			const result = await fn(body.event.payload, ctx);
+			const result = await fn({ body: body.event.payload, headers: body.event.headers }, ctx);
 			const response: InvokeResponse = { logs, ok: true, result };
 			return Response.json(response);
 		} catch (error) {
 			const response: InvokeResponse = {
-				ok: false,
 				error: toErrorShape(error),
-				logs
+				logs,
+				ok: false
 			};
 			return Response.json(response);
 		}
