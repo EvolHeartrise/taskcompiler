@@ -6,7 +6,7 @@ import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
 import { typecheckWorkflow } from '../typecheck/service';
-import { EmitSuccess, validateSource, wrapTerminal } from './shared.ts';
+import { EmitSuccess, wrapTerminal } from './shared.ts';
 import type { TriggerType } from '$lib/server/db/types';
 
 export interface GenerateWorkflowOptions {
@@ -145,13 +145,6 @@ function makeEmitTool(
 				throw new TypeError('emit_workflow: `summary` must be a string');
 			}
 			state.attempts += 1;
-			const validation = validateSource(source);
-			if (!validation.ok) {
-				if (state.attempts >= maxAttempts) {
-					throw new Error(`${validation.error}. Max emit attempts (${maxAttempts}) exhausted.`);
-				}
-				throw new Error(`${validation.error}. Fix the source and call emit_workflow again.`);
-			}
 			const tc = typecheckWorkflow(secretNames, source);
 			if (!tc.ok) {
 				const details = tc.diagnostics.join('\n');

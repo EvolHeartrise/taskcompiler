@@ -7,7 +7,7 @@ import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { typecheckWorkflow } from '../typecheck/service';
-import { EmitSuccess, truncate, validateSource, wrapTerminal } from './shared.ts';
+import { EmitSuccess, truncate, wrapTerminal } from './shared.ts';
 import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
 
 export interface HealOptions {
@@ -462,13 +462,6 @@ function makeEmitFixedWorkflowTool(
 				throw new TypeError('emit_fixed_workflow: `summary` must be a string');
 			}
 			state.attempts += 1;
-			const validation = validateSource(source);
-			if (!validation.ok) {
-				if (state.attempts >= maxAttempts) {
-					throw new Error(`${validation.error}. Max emit attempts (${maxAttempts}) exhausted.`);
-				}
-				throw new Error(`${validation.error}. Fix the source and call emit_fixed_workflow again.`);
-			}
 			const tc = typecheckWorkflow(secretNames, source);
 			if (!tc.ok) {
 				const details = tc.diagnostics.join('\n');
