@@ -1,68 +1,72 @@
 import { CronExpressionParser } from 'cron-parser';
-import { listCronWorkflows, markWorkflowFired } from '$lib/server/db/queries/workflows';
-import { executeEvent } from '$lib/server/engine';
+import { listCronEventSources, markEventSourceFired } from '$lib/server/db/queries/event-sources';
+import { executeSourceEvent } from '$lib/server/engine';
 
 export interface CronTickResult {
 	scanned: number;
-	fired: Array<{ workflowId: string; runId: string; status: string }>;
-	skipped: Array<{ workflowId: string; reason: string }>;
+	fired: {
+		eventSourceId: string;
+		eventId: string;
+		dispatched: number;
+	}[];
+	skipped: { eventSourceId: string; reason: string }[];
 }
 
-// Fires AT MOST ONCE per workflow per tick. If multiple cron intervals were
-// missed (e.g. the control plane was down), only the next tick will fire — we
-// do NOT backfill missed intervals here. Intentional catch-up requires a
-// separate pass.
+// Fires AT MOST ONCE per event source per tick. If multiple cron intervals
+// Were missed (e.g. the control plane was down), only the next tick will
+// Fire — we do NOT backfill missed intervals here. Intentional catch-up
+// Requires a separate pass.
 export async function handleCronTick(now: number = Date.now()): Promise<CronTickResult> {
-	const workflows = await listCronWorkflows();
+	const sources = await listCronEventSources();
 	const result: CronTickResult = {
-		scanned: workflows.length,
 		fired: [],
+		scanned: sources.length,
 		skipped: []
 	};
 
-	for (const workflow of workflows) {
-		const expr = workflow.cronExpr;
+	for (const source of sources) {
+		const expr = source.cronExpr;
 		if (!expr) {
-			result.skipped.push({ workflowId: workflow.id, reason: 'missing cron expression' });
+			result.skipped.push({ eventSourceId: source.id, reason: 'missing cron expression' });
 			continue;
 		}
 
 		let nextDue: number;
 		try {
 			const iter = CronExpressionParser.parse(expr, {
-				currentDate: workflow.lastFiredAt > 0 ? new Date(workflow.lastFiredAt) : new Date(0),
+				currentDate: source.lastFiredAt > 0 ? new Date(source.lastFiredAt) : new Date(0),
 				tz: 'UTC'
 			});
 			nextDue = iter.next().getTime();
-		} catch (err) {
+		} catch (error) {
 			result.skipped.push({
-				workflowId: workflow.id,
-				reason: `invalid cron: ${expr}${err instanceof Error ? ` (${err.message})` : ''}`
+				eventSourceId: source.id,
+				reason: `invalid cron: ${expr}${error instanceof Error ? ` (${error.message})` : ''}`
 			});
 			continue;
 		}
 
 		if (nextDue > now) {
-			result.skipped.push({ workflowId: workflow.id, reason: 'not due yet' });
+			result.skipped.push({ eventSourceId: source.id, reason: 'not due yet' });
 			continue;
 		}
 
 		try {
-			await markWorkflowFired(workflow.id, now);
-			const exec = await executeEvent({
-				workflowId: workflow.id,
-				trigger: 'cron',
-				payload: { firedAt: now }
+			await markEventSourceFired(source.id, now);
+			const exec = await executeSourceEvent({
+				eventSourceId: source.id,
+				payload: { firedAt: now },
+				trigger: 'cron'
 			});
 			result.fired.push({
-				workflowId: workflow.id,
-				runId: exec.runId,
-				status: exec.status
+				dispatched: exec.dispatched.length,
+				eventId: exec.eventId,
+				eventSourceId: source.id
 			});
-		} catch (err) {
+		} catch (error) {
 			result.skipped.push({
-				workflowId: workflow.id,
-				reason: `error: ${err instanceof Error ? err.message : String(err)}`
+				eventSourceId: source.id,
+				reason: `error: ${error instanceof Error ? error.message : String(error)}`
 			});
 		}
 	}

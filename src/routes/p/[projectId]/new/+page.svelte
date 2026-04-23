@@ -2,37 +2,53 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { untrack } from 'svelte';
 	import type { PageProps } from './$types';
 
-	import { untrack } from 'svelte';
-
-	let { form }: PageProps = $props();
+	let { data, form }: PageProps = $props();
 	let projectId = $derived(page.params.projectId!);
 
 	const initial = untrack(() => form);
+	const initialData = untrack(() => data);
 	let name = $state(initial?.values?.name ?? '');
 	let prompt = $state(initial?.values?.prompt ?? '');
-	let trigger = $state<'webhook' | 'cron'>(
-		(initial?.values?.trigger as 'webhook' | 'cron' | undefined) ?? 'webhook'
+	let sourceId = $state(
+		initial?.values?.sourceId ??
+			initialData.preselectedSourceId ??
+			initialData.eventSources[0]?.id ??
+			''
 	);
-	let cronExpr = $state(initial?.values?.cronExpr ?? '');
+	let backfill = $state(Boolean(initial?.values?.backfill));
 	let submitting = $state(false);
 
-	let needsCron = $derived(trigger === 'cron');
+	let selectedSource = $derived(data.eventSources.find((s) => s.id === sourceId));
+
+	function triggerLabel(t: string, cron: string | null): string {
+		if (t === 'cron') return cron ? `cron (${cron})` : 'cron';
+		return 'webhook';
+	}
 </script>
 
 <div class="page-head">
 	<div>
-		<h1>New workflow</h1>
+		<h1>Attach workflow</h1>
 		<p class="muted">
-			Describe what the workflow should do in plain English. An LLM will generate a TypeScript
-			module that runs on every trigger.
+			Describe what this workflow should do in plain English. An LLM will generate a TypeScript
+			module that runs on every event from the selected event source.
 		</p>
 	</div>
 	<a href={resolve('/p/[projectId]', { projectId })} class="back">← Back</a>
 </div>
 
-{#if submitting}
+{#if data.eventSources.length === 0}
+	<div class="empty">
+		<p>No events yet. Workflows attach to an event source (webhook or cron schedule).</p>
+		<p>
+			<a href={resolve('/p/[projectId]/sources/new', { projectId })}>Create an event first</a>, then
+			come back here.
+		</p>
+	</div>
+{:else if submitting}
 	<div class="generating">
 		<div class="spinner" aria-hidden="true"></div>
 		<div>
@@ -59,6 +75,23 @@
 		}}
 	>
 		<label class="field">
+			<span>Event source</span>
+			<select name="sourceId" bind:value={sourceId} required>
+				{#each data.eventSources as s (s.id)}
+					<option value={s.id}>
+						{s.name} · {triggerLabel(s.triggerType, s.cronExpr)} · {s.eventCount} event{s.eventCount ===
+						1
+							? ''
+							: 's'}
+					</option>
+				{/each}
+			</select>
+			<span class="hint">
+				Every event from this source will fan out to this workflow (plus any siblings).
+			</span>
+		</label>
+
+		<label class="field">
 			<span>Name</span>
 			<input
 				name="name"
@@ -74,33 +107,28 @@
 			<textarea
 				name="prompt"
 				rows="8"
-				placeholder="Every day at 9am, fetch the top 5 posts from Hacker News and post them to the Slack webhook SLACK_WEBHOOK."
+				placeholder="Post the top 5 items from the incoming payload to the Slack webhook SLACK_WEBHOOK."
 				bind:value={prompt}
 				required
 			></textarea>
 		</label>
 
-		<fieldset class="field">
-			<legend>Trigger</legend>
-			<label class="radio">
-				<input type="radio" name="trigger" value="webhook" bind:group={trigger} /> webhook
-			</label>
-			<label class="radio">
-				<input type="radio" name="trigger" value="cron" bind:group={trigger} /> cron
-			</label>
-		</fieldset>
-
-		{#if needsCron}
-			<label class="field">
-				<span>Cron expression</span>
-				<input
-					name="cronExpr"
-					type="text"
-					placeholder="0 9 * * *"
-					bind:value={cronExpr}
-					required={needsCron}
-				/>
-				<span class="hint">Standard 5-field cron (min hour dom mon dow).</span>
+		{#if selectedSource && selectedSource.eventCount > 0}
+			<label class="field checkbox">
+				<input type="checkbox" name="backfill" bind:checked={backfill} />
+				<span>
+					<b
+						>Backfill against {selectedSource.eventCount} historical event{selectedSource.eventCount ===
+						1
+							? ''
+							: 's'}</b
+					>
+					<span class="hint">
+						After generation, run the new workflow against every past event on this source as replay
+						runs. Useful for graceful handover from an older workflow — the new one inherits the
+						source's history.
+					</span>
+				</span>
 			</label>
 		{/if}
 
@@ -138,6 +166,14 @@
 		padding: 10px 12px;
 		margin-bottom: 14px;
 	}
+	.empty {
+		background: #fff;
+		border: 1px dashed #d1d5db;
+		border-radius: 8px;
+		padding: 32px;
+		text-align: center;
+		color: #6b7280;
+	}
 	form {
 		background: #fff;
 		border: 1px solid #e5e7eb;
@@ -148,16 +184,32 @@
 		display: block;
 		margin-bottom: 18px;
 	}
-	.field > span,
-	legend {
+	.field > span {
 		display: block;
 		font-weight: 600;
 		font-size: 13px;
 		margin-bottom: 6px;
-		padding: 0;
+	}
+	.field.checkbox {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+	}
+	.field.checkbox input[type='checkbox'] {
+		margin-top: 3px;
+	}
+	.field.checkbox > span {
+		font-weight: 400;
+	}
+	.field.checkbox > span b {
+		display: block;
+		font-weight: 600;
+		font-size: 13px;
+		margin-bottom: 2px;
 	}
 	input[type='text'],
-	textarea {
+	textarea,
+	select {
 		width: 100%;
 		padding: 9px 11px;
 		border: 1px solid #d1d5db;
@@ -167,18 +219,6 @@
 	textarea {
 		resize: vertical;
 		font-family: inherit;
-	}
-	fieldset {
-		border: none;
-		padding: 0;
-		margin: 0 0 18px;
-	}
-	.radio {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		margin-right: 18px;
-		font-weight: 400;
 	}
 	.hint {
 		display: block;

@@ -18,17 +18,40 @@
 	// derivations come straight from page.params / page.data so the sidebar
 	// always reflects the URL — across tabs, in browser history, etc.
 	let activeProjectId = $derived<string | null>(page.params.projectId ?? null);
-	let projectWorkflows = $derived<Array<{ id: string; name: string }>>(
-		(page.data as { workflows?: Array<{ id: string; name: string }> }).workflows ?? []
+	let projectSources = $derived<
+		Array<{ id: string; name: string; triggerType: string; cronExpr: string | null }>
+	>(
+		(
+			page.data as {
+				eventSources?: Array<{
+					id: string;
+					name: string;
+					triggerType: string;
+					cronExpr: string | null;
+				}>;
+			}
+		).eventSources ?? []
 	);
+	let projectWorkflows = $derived<Array<{ id: string; name: string; eventSourceId: string }>>(
+		(
+			page.data as {
+				workflows?: Array<{ id: string; name: string; eventSourceId: string }>;
+			}
+		).workflows ?? []
+	);
+	let currentSourceId = $derived(page.params.sourceId ?? null);
 	let currentWorkflowId = $derived(page.params.workflowId ?? null);
 
 	let isOnProjectHome = $derived(
 		activeProjectId !== null && page.url.pathname === `/p/${activeProjectId}`
 	);
-	let isOnNew = $derived(page.url.pathname.endsWith('/new'));
+	let isOnNewSource = $derived(page.url.pathname.endsWith('/sources/new'));
 	let isOnSecrets = $derived(page.url.pathname.endsWith('/secrets'));
 	let isOnProjects = $derived(page.url.pathname.startsWith('/projects'));
+
+	function sourceTriggerLabel(t: string): string {
+		return t === 'cron' ? 'cron' : 'webhook';
+	}
 
 	async function onProjectChange(e: Event) {
 		const next = (e.currentTarget as HTMLSelectElement).value;
@@ -82,14 +105,14 @@
 							class="nav-link"
 							class:active={isOnProjectHome}
 						>
-							Workflows
+							Events
 						</a>
 						<a
-							href={resolve('/p/[projectId]/new', { projectId: activeProjectId })}
+							href={resolve('/p/[projectId]/sources/new', { projectId: activeProjectId })}
 							class="nav-link new"
-							class:active={isOnNew}
+							class:active={isOnNewSource}
 						>
-							+ New workflow
+							+ New event
 						</a>
 						<a
 							href={resolve('/p/[projectId]/secrets', { projectId: activeProjectId })}
@@ -100,23 +123,44 @@
 						</a>
 					</nav>
 
-					{#if projectWorkflows.length > 0}
+					{#if projectSources.length > 0}
 						<div class="section">
-							<div class="section-title">Workflows in this project</div>
+							<div class="section-title">Events in this project</div>
 							<ul class="wf-list">
-								{#each projectWorkflows as w (w.id)}
+								{#each projectSources as s (s.id)}
+									{@const attached = projectWorkflows.filter((w) => w.eventSourceId === s.id)}
 									<li>
 										<a
-											href={resolve('/p/[projectId]/w/[workflowId]', {
+											href={resolve('/p/[projectId]/s/[sourceId]', {
 												projectId: activeProjectId,
-												workflowId: w.id
+												sourceId: s.id
 											})}
 											class="wf-link"
-											class:active={currentWorkflowId === w.id}
-											title={w.name}
+											class:active={currentSourceId === s.id}
+											title={s.name}
 										>
-											{w.name}
+											<span class="wf-name">{s.name}</span>
+											<span class="wf-sub">{sourceTriggerLabel(s.triggerType)}</span>
 										</a>
+										{#if attached.length > 0}
+											<ul class="wf-sublist">
+												{#each attached as w (w.id)}
+													<li>
+														<a
+															href={resolve('/p/[projectId]/w/[workflowId]', {
+																projectId: activeProjectId,
+																workflowId: w.id
+															})}
+															class="wf-link nested"
+															class:active={currentWorkflowId === w.id}
+															title={w.name}
+														>
+															{w.name}
+														</a>
+													</li>
+												{/each}
+											</ul>
+										{/if}
 									</li>
 								{/each}
 							</ul>
@@ -325,6 +369,32 @@
 		background: #eef2ff;
 		color: #3730a3;
 		font-weight: 600;
+	}
+	.wf-link .wf-name {
+		font-weight: 600;
+		color: #111;
+	}
+	.wf-link .wf-sub {
+		display: block;
+		font-size: 11px;
+		color: #9ca3af;
+		font-weight: 400;
+	}
+	.wf-link.active .wf-name {
+		color: #3730a3;
+	}
+	.wf-sublist {
+		list-style: none;
+		margin: 2px 0 6px;
+		padding: 0 0 0 14px;
+		display: flex;
+		flex-direction: column;
+		gap: 1px;
+		border-left: 1px solid #e5e7eb;
+	}
+	.wf-link.nested {
+		font-size: 12.5px;
+		padding: 4px 10px;
 	}
 	.spacer {
 		flex: 1;

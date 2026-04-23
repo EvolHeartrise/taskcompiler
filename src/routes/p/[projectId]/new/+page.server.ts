@@ -1,17 +1,54 @@
-import { fail, redirect } from '@sveltejs/kit';
-import type { Actions } from './$types';
+import { error, fail, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
+import {
+	getEventSourceForProject,
+	listEventSourcesForProject
+} from '$lib/server/db/queries/event-sources';
+import { countEventsForSource } from '$lib/server/db/queries/events';
 import { createWorkflow } from '$lib/server/db/queries/workflows';
-import type { TriggerType } from '$lib/server/db/types';
+
+// Workflow creation form. Requires an event source — either picked via
+// `?source=<id>` (from the source detail page / project home) or selected
+// From the list below.
+export const load: PageServerLoad = async ({ params, url }) => {
+	const sources = await listEventSourcesForProject(params.projectId);
+
+	const preselectedId = url.searchParams.get('source');
+	let preselected = null;
+	if (preselectedId) {
+		preselected = await getEventSourceForProject(preselectedId, params.projectId);
+		if (!preselected) {
+			error(404, 'Event source not found');
+		}
+	}
+
+	// Show event counts so the "backfill" checkbox makes sense — no events =
+	// Nothing to backfill against.
+	const sourcesWithCount = await Promise.all(
+		sources.map(async (s) => ({
+			cronExpr: s.cronExpr,
+			eventCount: await countEventsForSource(s.id),
+			id: s.id,
+			name: s.name,
+			triggerType: s.triggerType
+		}))
+	);
+
+	return {
+		eventSources: sourcesWithCount,
+		preselectedSourceId: preselected?.id ?? null
+	};
+};
 
 export const actions: Actions = {
 	default: async (event) => {
 		const data = await event.request.formData();
 		const name = (data.get('name') ?? '').toString().trim();
 		const prompt = (data.get('prompt') ?? '').toString().trim();
-		const triggerRaw = (data.get('trigger') ?? '').toString().trim();
-		const cronExpr = (data.get('cronExpr') ?? '').toString().trim();
+		const sourceId = (data.get('sourceId') ?? '').toString().trim();
+		const backfill = data.get('backfill') === 'on';
 
-		const values = { cronExpr, name, prompt, trigger: triggerRaw };
+		const values = { backfill, name, prompt, sourceId };
 
 		if (!name) {
 			return fail(400, { error: 'Name is required.', values });
@@ -19,29 +56,29 @@ export const actions: Actions = {
 		if (!prompt) {
 			return fail(400, { error: 'Prompt is required.', values });
 		}
-		if (triggerRaw !== 'webhook' && triggerRaw !== 'cron') {
-			return fail(400, { error: 'Trigger must be webhook or cron.', values });
+		if (!sourceId) {
+			return fail(400, { error: 'Event source is required.', values });
 		}
-		const trigger = triggerRaw as TriggerType;
-		if (trigger === 'cron' && !cronExpr) {
-			return fail(400, { error: 'Cron expression is required for cron triggers.', values });
+
+		const { projectId } = event.params;
+		const source = await getEventSourceForProject(sourceId, projectId);
+		if (!source) {
+			return fail(400, { error: 'Event source not found in this project.', values });
 		}
 
 		if (!event.platform) {
 			return fail(500, { error: 'Platform bindings unavailable.', values });
 		}
-		// Project ownership is enforced by /p/[projectId]/+layout.server.ts.
+
 		const workflowId = crypto.randomUUID();
-		const { projectId } = event.params;
 
 		try {
 			await createWorkflow({
-				cronExpr: cronExpr || null,
+				eventSourceId: source.id,
 				id: workflowId,
 				name,
 				projectId,
-				prompt,
-				triggerType: trigger
+				prompt
 			});
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -52,10 +89,9 @@ export const actions: Actions = {
 			await event.platform.env.GEN_WORKFLOW.create({
 				id: `gen-${workflowId}`,
 				params: {
-					cronExpr: cronExpr || null,
+					backfill,
 					name,
 					prompt,
-					triggerType: trigger,
 					workflowId
 				}
 			});

@@ -71,19 +71,35 @@ CREATE TABLE projects (
 );
 CREATE INDEX idx_projects_user ON projects(user_id, created_at);
 
-CREATE TABLE workflows (
+-- Event sources are the base trigger definition — a webhook URL or cron
+-- schedule. Events are persisted per source (not per workflow) and fanned out
+-- to every workflow attached. This enables parallel workflows on a single
+-- event stream (graceful handover, A/B, backfill of new workflows against
+-- captured history).
+CREATE TABLE event_sources (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
-  prompt TEXT NOT NULL,
-  current_version_id TEXT REFERENCES workflow_versions(id),
   trigger_type TEXT NOT NULL CHECK(trigger_type IN ('webhook','cron')),
   cron_expr TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_fired_at INTEGER NOT NULL DEFAULT 0
 );
+CREATE INDEX idx_event_sources_project ON event_sources(project_id, created_at);
+
+CREATE TABLE workflows (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  event_source_id TEXT NOT NULL REFERENCES event_sources(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  current_version_id TEXT REFERENCES workflow_versions(id),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 CREATE INDEX idx_workflows_project ON workflows(project_id, created_at);
+CREATE INDEX idx_workflows_event_source ON workflows(event_source_id);
 
 CREATE TABLE workflow_versions (
   id TEXT PRIMARY KEY,
@@ -101,14 +117,14 @@ CREATE INDEX idx_workflow_versions_workflow ON workflow_versions(workflow_id, ve
 
 CREATE TABLE events (
   id TEXT PRIMARY KEY,
-  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  event_source_id TEXT NOT NULL REFERENCES event_sources(id) ON DELETE CASCADE,
   trigger_type TEXT NOT NULL CHECK(trigger_type IN ('webhook','cron','manual','replay')),
   payload_json TEXT NOT NULL,
   headers_json TEXT NOT NULL DEFAULT '{}',
   received_at INTEGER NOT NULL,
   dedup_key TEXT
 );
-CREATE INDEX idx_events_workflow_time ON events(workflow_id, received_at);
+CREATE INDEX idx_events_source_time ON events(event_source_id, received_at);
 
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,

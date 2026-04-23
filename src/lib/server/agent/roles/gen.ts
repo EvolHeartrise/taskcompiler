@@ -7,6 +7,7 @@ import {
 } from '../index.ts';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
+import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
 import { typecheckWorkflow } from '$lib/server/typecheck/service';
@@ -15,16 +16,15 @@ import type { TriggerType } from '$lib/server/db/types';
 export interface GenerateWorkflowOptions {
 	name: string;
 	prompt: string;
-	triggerType: TriggerType;
-	cronExpr?: string | null;
 	model?: string;
 	onEvent?: (e: AgentEvent) => void;
 	/**
-	 * If provided, the workflow row is created with this id instead of a freshly
-	 * generated one. Lets the caller (e.g. the UI form action) mint the id
-	 * upfront and redirect to /w/[id] before generation completes.
+	 * The workflow row must exist before generation starts (the /new form
+	 * action pre-inserts it so /w/[id] can render while gen is pending).
+	 * Pass the id here — the row's event_source_id is used to describe the
+	 * trigger in the user message.
 	 */
-	workflowIdOverride?: string;
+	workflowIdOverride: string;
 }
 
 export interface GenerateWorkflowResult {
@@ -114,8 +114,13 @@ function validateSource(source: string): { ok: true } | { ok: false; error: stri
 	return { ok: true };
 }
 
-function buildUserMessage(opts: GenerateWorkflowOptions, secretNames: string[]): string {
-	const trigger = formatTrigger(opts.triggerType, opts.cronExpr ?? null);
+function buildUserMessage(
+	opts: GenerateWorkflowOptions,
+	triggerType: TriggerType,
+	cronExpr: string | null,
+	secretNames: string[]
+): string {
+	const trigger = formatTrigger(triggerType, cronExpr);
 	const lines = [
 		`Workflow name: ${opts.name}`,
 		`Trigger: ${trigger}`,
@@ -221,18 +226,17 @@ export async function generateWorkflow(
 
 	const controller = new AbortController();
 
-	// The /new form action pre-inserts the workflow row so /w/[id] can render
-	// While generation is pending. The id is passed in via workflowIdOverride.
-	if (!opts.workflowIdOverride) {
-		throw new Error('generateWorkflow: workflowIdOverride is required (caller must pre-insert)');
-	}
 	const preWorkflow = await getWorkflow(opts.workflowIdOverride);
 	if (!preWorkflow) {
 		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
 	}
+	const source = await getEventSource(preWorkflow.eventSourceId);
+	if (!source) {
+		throw new Error(`generateWorkflow: event source not found (id=${preWorkflow.eventSourceId})`);
+	}
 	const secretMetas = await listSecretNamesForProject(preWorkflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
-	const userMessage = buildUserMessage(opts, secretNames);
+	const userMessage = buildUserMessage(opts, source.triggerType, source.cronExpr, secretNames);
 
 	// Wrap the emit tool so that on a successful emit, we capture the payload
 	// And abort the agent loop to return promptly.

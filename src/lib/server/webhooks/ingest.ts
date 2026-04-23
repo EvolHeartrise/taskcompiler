@@ -1,31 +1,28 @@
-// Inbound webhook ingestion: redact headers + persist the event.
+// Inbound webhook ingestion: redact headers + hand off to the executor for
+// Fanout. Headers are redacted at this boundary (auth/signature stripped, CF
+// Noise dropped) before they ever touch D1 or reach user workflow code.
 //
-// Decoupled from execution so the hook handler can persist regardless of
-// Whether the workflow is ready to invoke. Headers are redacted at this
-// Boundary (auth/signature stripped, CF noise dropped) before they ever
-// Touch D1 or reach the user's workflow code.
+// The bootstrap worker constructs the user-visible `{ body, headers }` event
+// From `event.payload` + `event.headers`, so here we persist those two as
+// Separate fields and do NOT pre-wrap them.
 
-import { createEvent } from '$lib/server/db/queries/events';
-import type { Event } from '$lib/server/db/types';
+import { type ExecuteSourceEventResult, executeSourceEvent } from '$lib/server/engine';
 import { redactHeaders } from './redact';
 
 export interface IngestWebhookInput {
-	workflowId: string;
+	eventSourceId: string;
 	payload: unknown;
 	rawHeaders: Headers | Record<string, string>;
 }
 
-export interface IngestWebhookResult {
-	event: Event;
-}
-
-export async function ingestWebhookEvent(input: IngestWebhookInput): Promise<IngestWebhookResult> {
+export async function ingestWebhookEvent(
+	input: IngestWebhookInput
+): Promise<ExecuteSourceEventResult> {
 	const headers = redactHeaders(input.rawHeaders);
-	const event = await createEvent({
+	return executeSourceEvent({
+		eventSourceId: input.eventSourceId,
 		headers,
 		payload: input.payload,
-		triggerType: 'webhook',
-		workflowId: input.workflowId
+		trigger: 'webhook'
 	});
-	return { event };
 }

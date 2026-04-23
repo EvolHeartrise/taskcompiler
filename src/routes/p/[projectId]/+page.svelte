@@ -15,78 +15,135 @@
 		if (t === 'cron') return cron ? `cron (${cron})` : 'cron';
 		return 'webhook';
 	}
+
+	// Group workflows by their event source so each source card can list
+	// everything attached to it.
+	let workflowsBySource = $derived(
+		data.workflows.reduce<Record<string, typeof data.workflows>>((acc, w) => {
+			(acc[w.eventSourceId] ??= []).push(w);
+			return acc;
+		}, {})
+	);
 </script>
 
 <div class="page-head">
-	<h1>Workflows</h1>
-	<a class="btn primary" href={resolve('/p/[projectId]/new', { projectId })}>+ New workflow</a>
+	<div>
+		<h1>Events</h1>
+		<p class="muted small">
+			An event is a webhook URL or cron schedule. Attach one or more workflows to fan out every
+			event to each workflow in parallel.
+		</p>
+	</div>
+	<a class="btn primary" href={resolve('/p/[projectId]/sources/new', { projectId })}>+ New event</a>
 </div>
 
-{#if data.workflows.length === 0}
+{#if data.eventSources.length === 0}
 	<div class="empty">
-		<p>No workflows yet.</p>
+		<p>No events yet.</p>
 		<p>
-			<a href={resolve('/p/[projectId]/new', { projectId })}>Create your first one</a> by describing what
-			it should do in plain English.
+			<a href={resolve('/p/[projectId]/sources/new', { projectId })}>Create your first one</a> — a webhook
+			URL or cron schedule. Then attach workflows to it.
 		</p>
 	</div>
 {:else}
-	<table class="wf-table">
-		<thead>
-			<tr>
-				<th>Name</th>
-				<th>Trigger</th>
-				<th class="num">Events</th>
-				<th class="num">Runs</th>
-				<th class="num">Failed</th>
-				<th>Created</th>
-				<th></th>
-			</tr>
-		</thead>
-		<tbody>
-			{#each data.workflows as w (w.id)}
-				<tr>
-					<td>
+	<ul class="source-list">
+		{#each data.eventSources as s (s.id)}
+			{@const attached = workflowsBySource[s.id] ?? []}
+			<li class="source-card">
+				<div class="source-head">
+					<div>
 						<a
-							class="name"
-							href={resolve('/p/[projectId]/w/[workflowId]', { projectId, workflowId: w.id })}
+							class="source-name"
+							href={resolve('/p/[projectId]/s/[sourceId]', { projectId, sourceId: s.id })}
 						>
-							{w.name}
+							{s.name}
 						</a>
-						<div class="id">{w.id}</div>
-					</td>
-					<td>{triggerLabel(w.triggerType, w.cronExpr)}</td>
-					<td class="num">{w.totalEvents}</td>
-					<td class="num">{w.totalRuns}</td>
-					<td class="num">
-						{#if w.failedRuns > 0}
-							<span class="badge failed">{w.failedRuns}</span>
-						{:else}
-							0
-						{/if}
-					</td>
-					<td class="muted">{fmt(w.createdAt)}</td>
-					<td>
-						<a href={resolve('/p/[projectId]/w/[workflowId]', { projectId, workflowId: w.id })}>
-							Open →
-						</a>
-					</td>
-				</tr>
-			{/each}
-		</tbody>
-	</table>
+						<div class="source-meta">
+							<span class="chip">{triggerLabel(s.triggerType, s.cronExpr)}</span>
+							<span class="muted small">{s.totalEvents} events</span>
+							<span class="muted small">· created {fmt(s.createdAt)}</span>
+						</div>
+					</div>
+					<a
+						class="btn small"
+						href={resolve(
+							`/p/[projectId]/new?source=${encodeURIComponent(s.id)}` as `/p/[projectId]/new?${string}`,
+							{ projectId }
+						)}
+					>
+						+ Attach workflow
+					</a>
+				</div>
+				{#if attached.length === 0}
+					<div class="no-workflows">No workflows attached yet.</div>
+				{:else}
+					<table class="wf-table">
+						<thead>
+							<tr>
+								<th>Workflow</th>
+								<th class="num">Runs</th>
+								<th class="num">Failed</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each attached as w (w.id)}
+								<tr>
+									<td>
+										<a
+											class="wf-name"
+											href={resolve('/p/[projectId]/w/[workflowId]', {
+												projectId,
+												workflowId: w.id
+											})}
+										>
+											{w.name}
+										</a>
+										<div class="wf-id">{w.id}</div>
+									</td>
+									<td class="num">{w.totalRuns}</td>
+									<td class="num">
+										{#if w.failedRuns > 0}
+											<span class="badge failed">{w.failedRuns}</span>
+										{:else}
+											0
+										{/if}
+									</td>
+									<td>
+										<a
+											href={resolve('/p/[projectId]/w/[workflowId]', {
+												projectId,
+												workflowId: w.id
+											})}>Open →</a
+										>
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				{/if}
+			</li>
+		{/each}
+	</ul>
 {/if}
 
 <style>
 	.page-head {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		justify-content: space-between;
-		margin-bottom: 16px;
+		gap: 20px;
+		margin-bottom: 20px;
 	}
 	h1 {
 		font-size: 22px;
-		margin: 0;
+		margin: 0 0 4px;
+	}
+	.muted {
+		color: #6b7280;
+	}
+	.small {
+		font-size: 12px;
 	}
 	.btn {
 		display: inline-block;
@@ -106,6 +163,10 @@
 		background: #000;
 		text-decoration: none;
 	}
+	.btn.small {
+		padding: 5px 10px;
+		font-size: 12px;
+	}
 	.empty {
 		background: #fff;
 		border: 1px dashed #d1d5db;
@@ -114,46 +175,84 @@
 		text-align: center;
 		color: #6b7280;
 	}
-	.wf-table {
-		width: 100%;
-		border-collapse: collapse;
+	.source-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+	}
+	.source-card {
 		background: #fff;
 		border: 1px solid #e5e7eb;
 		border-radius: 8px;
-		overflow: hidden;
+		padding: 14px 16px;
+	}
+	.source-head {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 12px;
+	}
+	.source-name {
+		display: inline-block;
+		font-weight: 700;
+		font-size: 16px;
+		color: #111;
+	}
+	.source-meta {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		margin-top: 2px;
+	}
+	.chip {
+		display: inline-block;
+		padding: 2px 8px;
+		border-radius: 999px;
+		background: #eef2ff;
+		color: #3730a3;
+		font-size: 12px;
+		font-weight: 500;
+	}
+	.no-workflows {
+		color: #6b7280;
+		font-size: 13px;
+		padding: 6px 2px 2px;
+	}
+	.wf-table {
+		width: 100%;
+		border-collapse: collapse;
 	}
 	.wf-table th,
 	.wf-table td {
-		padding: 10px 12px;
-		border-bottom: 1px solid #f1f5f9;
+		padding: 8px 10px;
+		border-top: 1px solid #f1f5f9;
 		text-align: left;
 		vertical-align: top;
 	}
 	.wf-table th {
-		background: #f9fafb;
 		font-weight: 600;
 		color: #374151;
-		font-size: 12px;
+		font-size: 11px;
 		text-transform: uppercase;
-		letter-spacing: 0.02em;
-	}
-	.wf-table tbody tr:last-child td {
-		border-bottom: none;
+		letter-spacing: 0.03em;
+		background: #f9fafb;
 	}
 	.wf-table .num {
 		text-align: right;
 	}
-	.wf-table .name {
+	.wf-name {
 		font-weight: 600;
 		color: #111;
 	}
-	.wf-table .id {
+	.wf-id {
 		font-family: ui-monospace, monospace;
 		font-size: 11px;
 		color: #9ca3af;
-	}
-	.muted {
-		color: #6b7280;
 	}
 	.badge {
 		display: inline-block;
