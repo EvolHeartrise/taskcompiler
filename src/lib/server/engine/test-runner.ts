@@ -1,3 +1,4 @@
+import type { Response as CfResponse } from '@cloudflare/workers-types';
 import { getEnv } from '$lib/server/env';
 import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 import { projectIdBinding, testScriptName } from '$lib/server/workflows-store';
@@ -51,7 +52,7 @@ export async function runAgainstEventEphemeral(
 		}
 
 		const env = getEnv();
-		let response: Awaited<ReturnType<ReturnType<typeof env.DISPATCHER.get>['fetch']>>;
+		let response: CfResponse;
 		try {
 			response = await env.DISPATCHER.get(scriptName).fetch('https://workflow.invoke/', {
 				body: JSON.stringify({
