@@ -90,14 +90,6 @@ export async function listEventsForSource(
 	return res.results.map(rowToEvent);
 }
 
-export async function listAllEventsForSource(sourceId: string): Promise<Event[]> {
-	const res = await getDb()
-		.prepare(`SELECT * FROM events WHERE event_source_id = ? ORDER BY received_at ASC`)
-		.bind(sourceId)
-		.all<EventRow>();
-	return res.results.map(rowToEvent);
-}
-
 // Convenience: list events for a workflow by joining on its event_source_id.
 // Used by the UI and agent tools so callers don't need to do the join.
 export async function listEventsForWorkflow(
