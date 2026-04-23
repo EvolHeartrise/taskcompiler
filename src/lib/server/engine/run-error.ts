@@ -1,6 +1,6 @@
 import type { RunError } from '$lib/server/db/types';
 
-export function safeStringify(v: unknown): string {
+function safeStringify(v: unknown): string {
 	try {
 		return typeof v === 'string' ? v : JSON.stringify(v);
 	} catch {
