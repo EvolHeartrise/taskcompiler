@@ -14,6 +14,7 @@ PRAGMA defer_foreign_keys = TRUE;
 DROP TABLE IF EXISTS workflow_state;
 DROP TABLE IF EXISTS heal_sessions;
 DROP TABLE IF EXISTS runs;
+DROP TABLE IF EXISTS event_shapes;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS workflow_versions;
 DROP TABLE IF EXISTS project_secrets;

@@ -6,6 +6,8 @@ interface EventRow {
 	workflow_id: string;
 	trigger_type: EventTriggerType;
 	payload_json: string;
+	headers_json: string;
+	shape_hash: string | null;
 	received_at: number;
 	dedup_key: string | null;
 }
@@ -13,9 +15,11 @@ interface EventRow {
 function rowToEvent(row: EventRow): Event {
 	return {
 		dedupKey: row.dedup_key,
+		headers: JSON.parse(row.headers_json) as Record<string, string>,
 		id: row.id,
 		payload: JSON.parse(row.payload_json) as unknown,
 		receivedAt: row.received_at,
+		shapeHash: row.shape_hash,
 		triggerType: row.trigger_type,
 		workflowId: row.workflow_id
 	};
@@ -25,6 +29,8 @@ export interface CreateEventInput {
 	workflowId: string;
 	triggerType: EventTriggerType;
 	payload: unknown;
+	headers?: Record<string, string>;
+	shapeHash?: string | null;
 	dedupKey?: string | null;
 	receivedAt?: number;
 }
@@ -34,14 +40,16 @@ export async function createEvent(input: CreateEventInput): Promise<Event> {
 	const receivedAt = input.receivedAt ?? now();
 	await getDb()
 		.prepare(
-			`INSERT INTO events (id, workflow_id, trigger_type, payload_json, received_at, dedup_key)
-			 VALUES (?, ?, ?, ?, ?, ?)`
+			`INSERT INTO events (id, workflow_id, trigger_type, payload_json, headers_json, shape_hash, received_at, dedup_key)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			id,
 			input.workflowId,
 			input.triggerType,
 			JSON.stringify(input.payload ?? null),
+			JSON.stringify(input.headers ?? {}),
+			input.shapeHash ?? null,
 			receivedAt,
 			input.dedupKey ?? null
 		)

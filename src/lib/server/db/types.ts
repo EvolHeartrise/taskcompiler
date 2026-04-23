@@ -1,5 +1,6 @@
 export type TriggerType = 'webhook' | 'cron';
 export type EventTriggerType = 'webhook' | 'cron' | 'manual' | 'replay';
+export type WorkflowStatus = 'awaiting_first_event' | 'generating' | 'ready' | 'failed';
 export type RunStatus = 'running' | 'ok' | 'failed' | 'superseded';
 export type HealStatus =
 	| 'running'
@@ -35,6 +36,9 @@ export interface Workflow {
 	currentVersionId: string | null;
 	triggerType: TriggerType;
 	cronExpr: string | null;
+	status: WorkflowStatus;
+	inferredEventTypeTs: string | null;
+	inferredAt: number | null;
 	createdAt: number;
 	updatedAt: number;
 	lastFiredAt: number;
@@ -57,8 +61,21 @@ export interface Event {
 	workflowId: string;
 	triggerType: EventTriggerType;
 	payload: unknown;
+	headers: Record<string, string>;
+	shapeHash: string | null;
 	receivedAt: number;
 	dedupKey: string | null;
+}
+
+export interface EventShape {
+	workflowId: string;
+	shapeHash: string;
+	shapeJson: string;
+	samplePayload: unknown;
+	sampleHeaders: Record<string, string>;
+	firstSeen: number;
+	lastSeen: number;
+	count: number;
 }
 
 export interface RunError {
