@@ -90,6 +90,23 @@ export async function listWorkflowsForEventSource(eventSourceId: string): Promis
 	return res.results.map(rowToWorkflow);
 }
 
+// Batched workflow counts per source for a project — one query instead of N
+// Per-source list lookups from the home loader.
+export async function countWorkflowsBySourceForProject(
+	projectId: string
+): Promise<Map<string, number>> {
+	const res = await getDb()
+		.prepare(
+			`SELECT event_source_id AS source_id, COUNT(*) AS count
+			 FROM workflows
+			 WHERE project_id = ?
+			 GROUP BY event_source_id`
+		)
+		.bind(projectId)
+		.all<{ source_id: string; count: number }>();
+	return new Map(res.results.map((r) => [r.source_id, r.count]));
+}
+
 export interface UpdateWorkflowInput {
 	name?: string;
 	currentVersionId?: string | null;
