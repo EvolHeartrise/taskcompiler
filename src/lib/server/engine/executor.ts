@@ -319,11 +319,6 @@ export async function executeExistingEventForWorkflow(
 	if (!workflow) {
 		throw new Error(`Workflow not found: ${workflowId}`);
 	}
-	if (workflow.eventSourceId !== event.eventSourceId) {
-		throw new Error(
-			`Event ${eventId} does not belong to workflow ${workflowId} (different event source)`
-		);
-	}
 
 	const version = await getCurrentVersion(workflow.id);
 	if (!version) {
