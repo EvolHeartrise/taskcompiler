@@ -2,15 +2,37 @@ import { createEvent, getEvent } from '$lib/server/db/queries/events';
 import { getActiveHealSession, getOpenNeedsAttentionSession } from '$lib/server/db/queries/heals';
 import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
-import { getWorkflow } from '$lib/server/db/queries/workflows';
+import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunLogEntry, RunStatus } from '$lib/server/db/types';
 import { getEnv } from '$lib/server/env';
 
-export interface ExecuteOptions {
-	workflowId: string;
+export interface ExecuteSourceEventOptions {
+	eventSourceId: string;
 	trigger: EventTriggerType;
 	payload: unknown;
+	headers?: Record<string, string>;
 	dedupKey?: string;
+}
+
+export interface ExecuteManualOptions {
+	workflowId: string;
+	payload: unknown;
+	dedupKey?: string;
+}
+
+export interface WorkflowDispatchResult {
+	workflowId: string;
+	runId: string;
+	status: RunStatus;
+	result?: unknown;
+	error?: RunError;
+	skipped?: 'no_current_version';
+}
+
+export interface ExecuteSourceEventResult {
+	eventId: string;
+	eventSourceId: string;
+	dispatched: WorkflowDispatchResult[];
 }
 
 export interface ExecuteResult {
@@ -21,7 +43,7 @@ export interface ExecuteResult {
 	error?: RunError;
 }
 
-export interface ExecuteExistingOptions {
+export interface ExecuteExistingForWorkflowOptions {
 	isReplay?: boolean;
 	parentRunId?: string;
 }
@@ -180,7 +202,65 @@ async function dispatchWithRetry(args: {
 	return last!;
 }
 
-export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult> {
+// Capture an event on an event source and fan out to every workflow attached
+// To the source. Each workflow that has a current version gets its own run;
+// Workflows still generating (no currentVersionId) are skipped — the event
+// Is persisted and can be replayed (or backfilled) once they come online.
+export async function executeSourceEvent(
+	opts: ExecuteSourceEventOptions
+): Promise<ExecuteSourceEventResult> {
+	const event = await createEvent({
+		dedupKey: opts.dedupKey ?? null,
+		eventSourceId: opts.eventSourceId,
+		headers: opts.headers,
+		payload: opts.payload,
+		triggerType: opts.trigger
+	});
+
+	const workflows = await listWorkflowsForEventSource(opts.eventSourceId);
+	const dispatched: WorkflowDispatchResult[] = [];
+
+	for (const workflow of workflows) {
+		if (!workflow.currentVersionId) {
+			dispatched.push({
+				runId: '',
+				skipped: 'no_current_version',
+				status: 'running',
+				workflowId: workflow.id
+			});
+			continue;
+		}
+		try {
+			const exec = await executeExistingEventForWorkflow(event.id, workflow.id);
+			dispatched.push({
+				error: exec.error,
+				result: exec.result,
+				runId: exec.runId,
+				status: exec.status,
+				workflowId: workflow.id
+			});
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.error(`[executor] fanout dispatch failed for workflow=${workflow.id}: ${msg}`);
+			dispatched.push({
+				error: { category: 'infra', message: msg, name: 'DispatchThrew' },
+				runId: '',
+				status: 'failed',
+				workflowId: workflow.id
+			});
+		}
+	}
+
+	return {
+		dispatched,
+		eventId: event.id,
+		eventSourceId: opts.eventSourceId
+	};
+}
+
+// Manual trigger from a workflow page — creates a manual event under the
+// Workflow's event source and dispatches to that single workflow only.
+export async function executeManualEvent(opts: ExecuteManualOptions): Promise<ExecuteResult> {
 	const workflow = await getWorkflow(opts.workflowId);
 	if (!workflow) {
 		throw new Error(`Workflow not found: ${opts.workflowId}`);
@@ -191,26 +271,32 @@ export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult>
 
 	const event = await createEvent({
 		dedupKey: opts.dedupKey ?? null,
+		eventSourceId: workflow.eventSourceId,
 		payload: opts.payload,
-		triggerType: opts.trigger,
-		workflowId: workflow.id
+		triggerType: 'manual'
 	});
 
-	return executeExistingEvent(event.id);
+	return executeExistingEventForWorkflow(event.id, workflow.id);
 }
 
-export async function executeExistingEvent(
+export async function executeExistingEventForWorkflow(
 	eventId: string,
-	opts: ExecuteExistingOptions = {}
+	workflowId: string,
+	opts: ExecuteExistingForWorkflowOptions = {}
 ): Promise<ExecuteResult> {
 	const event = await getEvent(eventId);
 	if (!event) {
 		throw new Error(`Event not found: ${eventId}`);
 	}
 
-	const workflow = await getWorkflow(event.workflowId);
+	const workflow = await getWorkflow(workflowId);
 	if (!workflow) {
-		throw new Error(`Workflow not found: ${event.workflowId}`);
+		throw new Error(`Workflow not found: ${workflowId}`);
+	}
+	if (workflow.eventSourceId !== event.eventSourceId) {
+		throw new Error(
+			`Event ${eventId} does not belong to workflow ${workflowId} (different event source)`
+		);
 	}
 
 	const version = await getCurrentVersion(workflow.id);

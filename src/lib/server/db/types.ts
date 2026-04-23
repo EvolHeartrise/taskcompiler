@@ -27,17 +27,26 @@ export interface Project {
 	updatedAt: number;
 }
 
-export interface Workflow {
+export interface EventSource {
 	id: string;
 	projectId: string;
 	name: string;
-	prompt: string;
-	currentVersionId: string | null;
 	triggerType: TriggerType;
 	cronExpr: string | null;
 	createdAt: number;
 	updatedAt: number;
 	lastFiredAt: number;
+}
+
+export interface Workflow {
+	id: string;
+	projectId: string;
+	eventSourceId: string;
+	name: string;
+	prompt: string;
+	currentVersionId: string | null;
+	createdAt: number;
+	updatedAt: number;
 }
 
 export interface WorkflowVersion {
@@ -54,7 +63,7 @@ export interface WorkflowVersion {
 
 export interface Event {
 	id: string;
-	workflowId: string;
+	eventSourceId: string;
 	triggerType: EventTriggerType;
 	payload: unknown;
 	headers: Record<string, string>;

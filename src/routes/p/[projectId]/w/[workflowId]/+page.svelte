@@ -48,7 +48,7 @@
 		return sp.toString();
 	}
 
-	let webhookUrl = $derived(`${data.origin}/hook/${data.workflow.id}`);
+	let webhookUrl = $derived(`${data.origin}/hook/${data.eventSource.id}`);
 
 	let triggerPayload = $state('{}');
 	let copied = $state(false);
@@ -177,7 +177,18 @@
 		</div>
 		<h1>{data.workflow.name}</h1>
 		<div class="meta">
-			<span class="chip">{triggerLabel(data.workflow.triggerType, data.workflow.cronExpr)}</span>
+			<span class="chip"
+				>{triggerLabel(data.eventSource.triggerType, data.eventSource.cronExpr)}</span
+			>
+			<a
+				class="source-link"
+				href={resolve('/p/[projectId]/s/[sourceId]', {
+					projectId,
+					sourceId: data.eventSource.id
+				})}
+			>
+				event: {data.eventSource.name}
+			</a>
 			<span class="mono muted">{data.workflow.id}</span>
 			<span class="muted">· created {fmt(data.workflow.createdAt)}</span>
 			{#if data.currentVersion}
@@ -290,9 +301,9 @@
 			</div>
 		</div>
 
-		{#if data.workflow.triggerType === 'webhook'}
+		{#if data.eventSource.triggerType === 'webhook'}
 			<div class="card">
-				<h2>Webhook URL</h2>
+				<h2>Event source — webhook URL</h2>
 				<div class="webhook-row">
 					<code class="webhook">{webhookUrl}</code>
 					<button type="button" class="btn small" onclick={copyWebhook}>
@@ -300,17 +311,29 @@
 					</button>
 				</div>
 				<p class="muted small">
-					Send a <code>POST</code> with a JSON body, or <code>GET</code> with query params.
+					Every request to this URL fans out to this workflow and any siblings attached to
+					<a
+						href={resolve('/p/[projectId]/s/[sourceId]', {
+							projectId,
+							sourceId: data.eventSource.id
+						})}>{data.eventSource.name}</a
+					>.
 				</p>
 			</div>
 		{:else}
 			<div class="card">
-				<h2>Schedule</h2>
+				<h2>Event source — schedule</h2>
 				<div class="webhook-row">
-					<code class="webhook">{data.workflow.cronExpr ?? '—'}</code>
+					<code class="webhook">{data.eventSource.cronExpr ?? '—'}</code>
 				</div>
 				<p class="muted small">
-					Fires automatically on this schedule (UTC). Use Manual trigger to test ad-hoc.
+					Fires on this schedule (UTC); every tick fans out to this workflow and any siblings on
+					<a
+						href={resolve('/p/[projectId]/s/[sourceId]', {
+							projectId,
+							sourceId: data.eventSource.id
+						})}>{data.eventSource.name}</a
+					>. Use Manual trigger to test ad-hoc.
 				</p>
 			</div>
 		{/if}
@@ -807,6 +830,10 @@
 		color: #3730a3;
 		font-size: 12px;
 		font-weight: 500;
+	}
+	.source-link {
+		font-size: 12.5px;
+		color: #2563eb;
 	}
 	.chip.small {
 		font-size: 11px;

@@ -2,6 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import type { Workflow } from '@cloudflare/workers-types';
 import type { Actions, PageServerLoad } from './$types';
 import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
+import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { getCurrentVersion, getVersion, listVersions } from '$lib/server/db/queries/versions';
 import { listEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
@@ -10,7 +11,7 @@ import {
 	listHealSessionsForWorkflow,
 	markHealSessionResolved
 } from '$lib/server/db/queries/heals';
-import { executeEvent, replayFailedEvents } from '$lib/server/engine';
+import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { highlightTs } from '$lib/server/highlight';
 
@@ -50,16 +51,29 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 		error(404, 'Workflow not found');
 	}
 
-	const [currentVersion, versions, events, allRuns, failedRuns, heals, needsAttention] =
-		await Promise.all([
-			getCurrentVersion(workflow.id),
-			listVersions(workflow.id),
-			listEventsForWorkflow(workflow.id, { limit: 50 }),
-			listRunsForWorkflow(workflow.id),
-			listFailedRunsForWorkflow(workflow.id),
-			listHealSessionsForWorkflow(workflow.id),
-			getOpenNeedsAttentionSession(workflow.id)
-		]);
+	const [
+		eventSource,
+		currentVersion,
+		versions,
+		events,
+		allRuns,
+		failedRuns,
+		heals,
+		needsAttention
+	] = await Promise.all([
+		getEventSource(workflow.eventSourceId),
+		getCurrentVersion(workflow.id),
+		listVersions(workflow.id),
+		listEventsForWorkflow(workflow.id, { limit: 50 }),
+		listRunsForWorkflow(workflow.id),
+		listFailedRunsForWorkflow(workflow.id),
+		listHealSessionsForWorkflow(workflow.id),
+		getOpenNeedsAttentionSession(workflow.id)
+	]);
+	if (!eventSource) {
+		// Shouldn't happen — cascade would have wiped the workflow. Treat as 404.
+		error(404, 'Event source for this workflow was deleted');
+	}
 	const runs = allRuns.slice(0, 50);
 
 	const totalRuns = allRuns.length;
@@ -99,6 +113,7 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 
 	return {
 		currentVersion,
+		eventSource,
 		events,
 		failedRuns,
 		heals,
@@ -191,9 +206,8 @@ export const actions: Actions = {
 		}
 
 		try {
-			const result = await executeEvent({
+			const result = await executeManualEvent({
 				payload,
-				trigger: 'manual',
 				workflowId: params.workflowId
 			});
 			return {

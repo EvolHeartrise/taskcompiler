@@ -311,10 +311,10 @@ function makeListEventsTool(workflowId: string): Tool {
 	};
 }
 
-function makeGetEventTool(workflowId: string): Tool {
+function makeGetEventTool(workflowId: string, eventSourceId: string): Tool {
 	return {
 		description:
-			'Fetch full details of a single event (including payload) by id. The event must belong to this workflow.',
+			"Fetch full details of a single event (including payload) by id. The event must belong to this workflow's event source.",
 		inputSchema: {
 			additionalProperties: false,
 			properties: {
@@ -334,8 +334,10 @@ function makeGetEventTool(workflowId: string): Tool {
 			if (!event) {
 				throw new Error(`get_event: event not found: ${id}`);
 			}
-			if (event.workflowId !== workflowId) {
-				throw new Error(`get_event: event does not belong to this workflow`);
+			if (event.eventSourceId !== eventSourceId) {
+				throw new Error(
+					`get_event: event does not belong to this workflow's event source (workflowId=${workflowId})`
+				);
 			}
 			return JSON.stringify({
 				id: event.id,
@@ -450,12 +452,12 @@ function makeRunTestEventTool(workflowId: string): Tool {
 			if (!event) {
 				throw new Error(`run_test_event: event not found: ${eventId}`);
 			}
-			if (event.workflowId !== workflowId) {
-				throw new Error('run_test_event: event does not belong to this workflow');
-			}
 			const workflow = await getWorkflow(workflowId);
 			if (!workflow) {
 				throw new Error(`run_test_event: workflow not found: ${workflowId}`);
+			}
+			if (event.eventSourceId !== workflow.eventSourceId) {
+				throw new Error("run_test_event: event does not belong to this workflow's event source");
 			}
 			const res = await runAgainstEventEphemeral(sourceTs, event, workflow);
 			const tail = res.logs.slice(-20);
@@ -651,7 +653,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	const tools: Tool[] = [
 		makeReadSourceTool(currentSource),
 		makeListEventsTool(opts.workflowId),
-		makeGetEventTool(opts.workflowId),
+		makeGetEventTool(opts.workflowId, workflow.eventSourceId),
 		makeListFailedRunsTool(opts.workflowId),
 		makeGetRunTool(opts.workflowId),
 		makeRunTestEventTool(opts.workflowId),
