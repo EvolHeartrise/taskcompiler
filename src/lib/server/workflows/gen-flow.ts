@@ -39,7 +39,7 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 					const out = await generateWorkflow({
 						name: params.name,
 						prompt: params.prompt,
-						workflowIdOverride: params.workflowId
+						workflowId: params.workflowId
 					});
 					return {
 						sourceTs: out.sourceTs,

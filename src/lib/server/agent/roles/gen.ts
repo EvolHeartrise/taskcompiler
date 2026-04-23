@@ -20,7 +20,7 @@ export interface GenerateWorkflowOptions {
 	 * Pass the id here — the row's event_source_id is used to describe the
 	 * trigger in the user message.
 	 */
-	workflowIdOverride: string;
+	workflowId: string;
 }
 
 export interface GenerateWorkflowResult {
@@ -185,9 +185,9 @@ export async function generateWorkflow(
 
 	const controller = new AbortController();
 
-	const preWorkflow = await getWorkflow(opts.workflowIdOverride);
+	const preWorkflow = await getWorkflow(opts.workflowId);
 	if (!preWorkflow) {
-		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowIdOverride})`);
+		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowId})`);
 	}
 	const source = await getEventSource(preWorkflow.eventSourceId);
 	if (!source) {
