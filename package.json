@@ -8,7 +8,7 @@
 		"build": "bun run scripts/generate-templates.ts && vite build && bun run scripts/generate-templates.ts",
 		"preview": "bun run scripts/generate-templates.ts && vite build && bun run scripts/generate-templates.ts && wrangler dev",
 		"deploy": "bun run scripts/generate-templates.ts && vite build && bun run scripts/generate-templates.ts && wrangler deploy",
-		"prepare": "playwright install && svelte-kit sync || echo ''",
+		"prepare": "playwright install && svelte-kit sync && wrangler types || echo ''",
 		"check": "bun run scripts/generate-templates.ts && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --incremental --tsgo --diagnostic-sources \"js,svelte\"",
 		"check:watch": "bun run scripts/generate-templates.ts && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --incremental --tsgo --watch",
 		"lint": "oxlint && eslint --cache --cache-location node_modules/.cache/eslint/ \"**/*.svelte\" && prettier --check --cache \"**/*.{svelte,json,md,css,html,yml,yaml}\" && oxfmt --check .",
