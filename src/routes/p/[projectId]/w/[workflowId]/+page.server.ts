@@ -27,7 +27,7 @@ export interface InFlightInfo {
 }
 
 async function fetchInstanceStatus(
-	binding: Workflow<unknown>,
+	binding: Workflow,
 	instanceId: string
 ): Promise<InFlightStatus | undefined> {
 	try {

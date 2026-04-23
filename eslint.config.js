@@ -37,6 +37,11 @@ export default defineConfig(
 			}
 		}
 	},
-	// Must be last: disables rules already covered by oxlint, mirroring .oxlintrc.json
-	...oxlint.buildFromOxlintConfigFile('./.oxlintrc.json')
+	// Must be last: disables rules already covered by oxlint, mirroring .oxlintrc.json.
+	// Drop the mirrored-ignorePatterns config entry so oxlint's ignore of *.svelte
+	// (needed because its prefer-const autofix breaks $state runes) doesn't cause
+	// ESLint to skip .svelte files too.
+	...oxlint
+		.buildFromOxlintConfigFile('./.oxlintrc.json')
+		.filter((c) => c.name !== 'oxlint/oxlint-config-ignore-patterns')
 );

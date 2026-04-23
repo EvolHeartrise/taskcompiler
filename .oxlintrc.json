@@ -1,5 +1,8 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"options": {
+		"typeAware": true
+	},
 	"categories": {
 		"correctness": "error",
 		"suspicious": "error",
@@ -14,7 +17,17 @@
 		"curly": "error",
 		"no-shadow": "error",
 		"no-await-in-loop": "off",
-		"no-map-spread": "off"
+		"no-map-spread": "off",
+		"no-floating-promises": "error",
+		"no-misused-promises": "error",
+		"await-thenable": "error",
+		"switch-exhaustiveness-check": "error",
+		"no-unsafe-argument": "error",
+		"no-unsafe-return": "error",
+		"no-unsafe-type-assertion": "off",
+		"no-base-to-string": "off",
+		"consistent-return": "off",
+		"no-unnecessary-type-parameters": "off"
 	},
 	"env": {
 		"browser": true,

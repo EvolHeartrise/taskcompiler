@@ -75,7 +75,7 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 		key,
 		next.catch(() => {})
 	);
-	return next as Promise<T>;
+	return next;
 }
 
 function sleep(ms: number): Promise<void> {

@@ -95,7 +95,7 @@ function headerHas(init: RequestInit | undefined, name: string): boolean {
 	if (Array.isArray(h)) {
 		return h.some(([k]) => k.toLowerCase() === needle);
 	}
-	return Object.keys(h as Record<string, string>).some((k) => k.toLowerCase() === needle);
+	return Object.keys(h).some((k) => k.toLowerCase() === needle);
 }
 
 /**

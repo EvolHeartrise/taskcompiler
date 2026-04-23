@@ -18,7 +18,7 @@ const root = path.resolve(here, '..');
 const templatesDir = path.join(root, 'templates/workflow-worker');
 const outFile = path.join(root, 'src/lib/server/wfp/templates.generated.ts');
 
-const sources: Record<string, string> = {
+const sources = {
 	ctx: readFileSync(path.join(templatesDir, 'ctx.ts'), 'utf8'),
 	ctxDts: readFileSync(path.join(templatesDir, 'ctx.d.ts'), 'utf8'),
 	error: readFileSync(path.join(templatesDir, 'error.ts'), 'utf8'),
