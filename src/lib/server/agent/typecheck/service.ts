@@ -14,8 +14,18 @@ import { TS_LIB_FILES } from './ts-lib.generated';
 const LIB_DIR = '/lib/';
 const CTX_FILENAME = '/ctx.d.ts';
 const WORKFLOW_FILENAME = '/workflow.ts';
+const MAIN_FILENAME = '/main.ts';
 const SECRET_PLACEHOLDER = '/* __RUNELY_SECRET_NAMES__ */ never';
 const MAX_REPORTED_DIAGNOSTICS = 20;
+
+// Pulls the workflow's default export through the same Ctx-typed signature
+// the bootstrap uses at runtime. With this in the program, TS reports a
+// missing default export (TS1192/TS2613) or wrong signature as a normal
+// diagnostic, instead of needing a separate regex pre-check.
+const MAIN_SOURCE = `import workflow from './workflow';
+const _check: (event: unknown, ctx: Ctx) => Promise<unknown> = workflow;
+void _check;
+`;
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
 	allowSyntheticDefaultImports: true,
@@ -53,6 +63,7 @@ function init(): ServiceState {
 	}
 	scripts.set(CTX_FILENAME, { text: renderCtxDts([]), version: 0 });
 	scripts.set(WORKFLOW_FILENAME, { text: '', version: 0 });
+	scripts.set(MAIN_FILENAME, { text: MAIN_SOURCE, version: 0 });
 
 	const host: ts.LanguageServiceHost = {
 		directoryExists: (dir) => dir === '/' || dir === LIB_DIR.slice(0, -1),
@@ -61,7 +72,7 @@ function init(): ServiceState {
 		getCurrentDirectory: () => '/',
 		getDefaultLibFileName: () => `${LIB_DIR}lib.es2023.d.ts`,
 		getDirectories: () => [],
-		getScriptFileNames: () => [CTX_FILENAME, WORKFLOW_FILENAME],
+		getScriptFileNames: () => [CTX_FILENAME, WORKFLOW_FILENAME, MAIN_FILENAME],
 		getScriptSnapshot: (name) => {
 			const s = scripts.get(name);
 			return s ? ts.ScriptSnapshot.fromString(s.text) : undefined;
@@ -115,7 +126,9 @@ export function typecheckWorkflow(secretNames: readonly string[], source: string
 
 	const raw: ts.Diagnostic[] = [
 		...service.getSyntacticDiagnostics(WORKFLOW_FILENAME),
-		...service.getSemanticDiagnostics(WORKFLOW_FILENAME)
+		...service.getSemanticDiagnostics(WORKFLOW_FILENAME),
+		...service.getSyntacticDiagnostics(MAIN_FILENAME),
+		...service.getSemanticDiagnostics(MAIN_FILENAME)
 	];
 
 	if (raw.length === 0) {
@@ -138,7 +151,9 @@ function formatDiagnostic(d: ts.Diagnostic): string {
 				? 'workflow.ts'
 				: d.file.fileName === CTX_FILENAME
 					? 'ctx.d.ts'
-					: d.file.fileName;
+					: d.file.fileName === MAIN_FILENAME
+						? 'workflow.ts (default export)'
+						: d.file.fileName;
 		return `${shortName}:${line + 1}:${character + 1} - error TS${d.code}: ${msg}`;
 	}
 	return `error TS${d.code}: ${msg}`;
