@@ -1,2 +1,2 @@
-export { generateWorkflow } from "./gen.ts";
-export type { GenerateWorkflowOptions, GenerateWorkflowResult } from "./gen.ts";
+export { generateWorkflow } from './gen.ts';
+export type { GenerateWorkflowOptions, GenerateWorkflowResult } from './gen.ts';

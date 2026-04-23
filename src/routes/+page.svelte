@@ -24,8 +24,7 @@
 	<div class="empty">
 		<p>No workflows yet.</p>
 		<p>
-			<a href={resolve('/new')}>Create your first one</a> by describing what it should do in plain
-			English.
+			<a href={resolve('/new')}>Create your first one</a> by describing what it should do in plain English.
 		</p>
 	</div>
 {:else}

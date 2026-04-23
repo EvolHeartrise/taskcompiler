@@ -1,5 +1,5 @@
 import { createEvent, getEvent } from '$lib/server/db/queries/events';
-import { getActiveHealSession } from '$lib/server/db/queries/heals';
+import { getActiveHealSession, getOpenNeedsAttentionSession } from '$lib/server/db/queries/heals';
 import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
@@ -33,6 +33,17 @@ interface InvokeResponseBody {
 	logs?: RunLogEntry[];
 }
 
+type DispatchOutcome =
+	| { kind: 'ok'; result: unknown; logs: RunLogEntry[] }
+	| { kind: 'user_error'; error: RunError; logs: RunLogEntry[] }
+	| { kind: 'infra_error'; error: RunError };
+
+const DISPATCH_MAX_ATTEMPTS = 4;
+const DISPATCH_BASE_DELAY_MS = 200;
+
+const DB_MAX_ATTEMPTS = 3;
+const DB_BASE_DELAY_MS = 150;
+
 const chains = new Map<string, Promise<unknown>>();
 
 function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -45,33 +56,116 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 	return next as Promise<T>;
 }
 
-function toRunError(err: unknown): RunError {
-	if (err instanceof Error) {
-		const out: RunError = {
-			name: err.name || 'Error',
-			message: err.message || String(err)
-		};
-		if (err.stack) out.stack = err.stack;
-		return out;
-	}
-	if (typeof err === 'object' && err !== null) {
-		const anyErr = err as { name?: unknown; message?: unknown; stack?: unknown };
-		const out: RunError = {
-			name: typeof anyErr.name === 'string' ? anyErr.name : 'NonError',
-			message: typeof anyErr.message === 'string' ? anyErr.message : safeStringify(err)
-		};
-		if (typeof anyErr.stack === 'string') out.stack = anyErr.stack;
-		return out;
-	}
-	return { name: 'NonError', message: safeStringify(err) };
+function sleep(ms: number): Promise<void> {
+	return new Promise((r) => setTimeout(r, ms));
 }
 
-function safeStringify(v: unknown): string {
-	try {
-		return typeof v === 'string' ? v : JSON.stringify(v);
-	} catch {
-		return String(v);
+function classifyInfraFailure(name: string, message: string): RunError {
+	return { category: 'infra', message, name };
+}
+
+async function withDbRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
+	let lastErr: unknown;
+	for (let i = 0; i < DB_MAX_ATTEMPTS; i++) {
+		try {
+			return await fn();
+		} catch (error) {
+			lastErr = error;
+			if (i < DB_MAX_ATTEMPTS - 1) {
+				const delay = DB_BASE_DELAY_MS * Math.pow(3, i);
+				console.warn(
+					`[executor] D1 transient error on ${label} (attempt ${i + 1}), retrying in ${delay}ms`,
+					{
+						error: error instanceof Error ? error.message : String(error)
+					}
+				);
+				await sleep(delay);
+			}
+		}
 	}
+	throw lastErr;
+}
+
+async function dispatchOnce(args: {
+	deployPath: string;
+	workflowId: string;
+	workflowName: string;
+	event: { id: string; triggerType: EventTriggerType; receivedAt: number; payload: unknown };
+}): Promise<DispatchOutcome> {
+	const env = getEnv();
+	try {
+		const response = await env.DISPATCHER.get(args.deployPath).fetch('https://workflow.invoke/', {
+			body: JSON.stringify({
+				workflow: { id: args.workflowId, name: args.workflowName },
+				event: args.event
+			}),
+			headers: { 'content-type': 'application/json' },
+			method: 'POST'
+		});
+		if (!response.ok) {
+			return {
+				error: classifyInfraFailure(
+					'DispatchHttpError',
+					`dispatcher returned HTTP ${response.status}`
+				),
+				kind: 'infra_error'
+			};
+		}
+		let body: InvokeResponseBody;
+		try {
+			body = (await response.json()) as InvokeResponseBody;
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			return {
+				error: classifyInfraFailure('InvalidDispatchBody', `dispatcher body parse failed: ${msg}`),
+				kind: 'infra_error'
+			};
+		}
+		const logs = body.logs ?? [];
+		if (body.ok) {
+			return { kind: 'ok', logs, result: body.result };
+		}
+		const rawErr = body.error ?? {
+			message: 'workflow reported failure with no error',
+			name: 'Error'
+		};
+		return {
+			error: { ...rawErr, category: 'user_code' },
+			kind: 'user_error',
+			logs
+		};
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		return {
+			error: classifyInfraFailure('DispatchNetworkError', `dispatcher fetch threw: ${msg}`),
+			kind: 'infra_error'
+		};
+	}
+}
+
+async function dispatchWithRetry(args: {
+	deployPath: string;
+	workflowId: string;
+	workflowName: string;
+	event: { id: string; triggerType: EventTriggerType; receivedAt: number; payload: unknown };
+}): Promise<DispatchOutcome> {
+	let last: DispatchOutcome | null = null;
+	for (let i = 0; i < DISPATCH_MAX_ATTEMPTS; i++) {
+		const outcome = await dispatchOnce(args);
+		if (outcome.kind !== 'infra_error') {
+			return outcome;
+		}
+		last = outcome;
+		if (i < DISPATCH_MAX_ATTEMPTS - 1) {
+			const delay = DISPATCH_BASE_DELAY_MS * 3 ** i;
+			console.warn(
+				`[executor] dispatch infra error (attempt ${i + 1}/${DISPATCH_MAX_ATTEMPTS}), retrying in ${delay}ms`,
+				{ error: outcome.error.message }
+			);
+			await sleep(delay);
+		}
+	}
+	return last!;
 }
 
 export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult> {
@@ -84,10 +178,10 @@ export async function executeEvent(opts: ExecuteOptions): Promise<ExecuteResult>
 	}
 
 	const event = await createEvent({
-		workflowId: workflow.id,
-		triggerType: opts.trigger,
+		dedupKey: opts.dedupKey ?? null,
 		payload: opts.payload,
-		dedupKey: opts.dedupKey ?? null
+		triggerType: opts.trigger,
+		workflowId: workflow.id
 	});
 
 	return executeExistingEvent(event.id);
@@ -98,10 +192,14 @@ export async function executeExistingEvent(
 	opts: ExecuteExistingOptions = {}
 ): Promise<ExecuteResult> {
 	const event = await getEvent(eventId);
-	if (!event) throw new Error(`Event not found: ${eventId}`);
+	if (!event) {
+		throw new Error(`Event not found: ${eventId}`);
+	}
 
 	const workflow = await getWorkflow(event.workflowId);
-	if (!workflow) throw new Error(`Workflow not found: ${event.workflowId}`);
+	if (!workflow) {
+		throw new Error(`Workflow not found: ${event.workflowId}`);
+	}
 
 	const version = await getCurrentVersion(workflow.id);
 	if (!version) {
@@ -111,61 +209,67 @@ export async function executeExistingEvent(
 	return withLock(workflow.id, async () => {
 		const run = await createRun({
 			eventId: event.id,
-			workflowId: workflow.id,
-			versionId: version.id,
 			isReplay: opts.isReplay ?? false,
-			parentRunId: opts.parentRunId ?? null
+			parentRunId: opts.parentRunId ?? null,
+			versionId: version.id,
+			workflowId: workflow.id
 		});
 
-		let runError: RunError | null = null;
-		let runResult: unknown;
-		let runLogs: RunLogEntry[] = [];
+		const outcome = await dispatchWithRetry({
+			deployPath: version.deployPath,
+			event: {
+				id: event.id,
+				payload: event.payload,
+				receivedAt: event.receivedAt,
+				triggerType: event.triggerType
+			},
+			workflowId: workflow.id,
+			workflowName: workflow.name
+		});
 
-		try {
-			const env = getEnv();
-			const response = await env.DISPATCHER.get(version.deployPath).fetch(
-				'https://workflow.invoke/',
-				{
-					method: 'POST',
-					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({
-						workflow: { id: workflow.id, name: workflow.name },
-						event: {
-							id: event.id,
-							triggerType: event.triggerType,
-							receivedAt: event.receivedAt,
-							payload: event.payload
-						}
-					})
-				}
-			);
-
-			const body = (await response.json()) as InvokeResponseBody;
-			runLogs = body.logs ?? [];
-
-			if (body.ok) {
-				runResult = body.result;
-			} else {
-				runError = body.error ?? {
-					name: 'Error',
-					message: 'workflow reported failure with no error'
-				};
-			}
-		} catch (err) {
-			runError = toRunError(err);
-		}
-
-		if (runError === null) {
-			await finishRunOk(run.id, runResult, runLogs);
+		if (outcome.kind === 'ok') {
+			await withDbRetry('finishRunOk', () => finishRunOk(run.id, outcome.result, outcome.logs));
 			return {
 				eventId: event.id,
+				result: outcome.result,
 				runId: run.id,
-				status: 'ok' as const,
-				result: runResult
+				status: 'ok' as const
 			};
 		}
 
-		await finishRunFailed(run.id, runError, runLogs);
+		// Both user_error and infra_error are persisted as failed runs. The
+		// Error.category on the row distinguishes them; only user_code
+		// Failures spawn a heal below.
+		const runError = outcome.error;
+		const runLogs = outcome.kind === 'user_error' ? outcome.logs : [];
+		await withDbRetry('finishRunFailed', () => finishRunFailed(run.id, runError, runLogs));
+
+		if (outcome.kind === 'infra_error') {
+			console.error(
+				`[executor] infra failure after retries for runId=${run.id}: ${runError.name}: ${runError.message}`
+			);
+			return {
+				error: runError,
+				eventId: event.id,
+				runId: run.id,
+				status: 'failed' as const
+			};
+		}
+
+		// User-code failure. Suppress heal if the workflow already has an
+		// Unresolved needs_attention session, or a running heal session.
+		const needsAttention = await getOpenNeedsAttentionSession(workflow.id);
+		if (needsAttention) {
+			console.log(
+				`[heal] skipping create for runId=${run.id}: workflow has unresolved needs_attention session (sessionId=${needsAttention.id})`
+			);
+			return {
+				error: runError,
+				eventId: event.id,
+				runId: run.id,
+				status: 'failed' as const
+			};
+		}
 		// Dedup: at most one in-flight heal per workflow. Small race window
 		// (two simultaneous failures can both spawn) bounds waste to ~2×.
 		// Missed failures are replayed by the winning heal's post-deploy sweep.
@@ -180,19 +284,19 @@ export async function executeExistingEvent(
 				await env.HEAL_WORKFLOW.create({
 					id: `heal-${run.id}`,
 					params: {
-						workflowId: workflow.id,
-						triggeringRunId: run.id
+						triggeringRunId: run.id,
+						workflowId: workflow.id
 					}
 				});
-			} catch (err) {
-				console.error('failed to start HEAL_WORKFLOW for runId=' + run.id, err);
+			} catch (error) {
+				console.error('failed to start HEAL_WORKFLOW for runId=' + run.id, error);
 			}
 		}
 		return {
+			error: runError,
 			eventId: event.id,
 			runId: run.id,
-			status: 'failed' as const,
-			error: runError
+			status: 'failed' as const
 		};
 	});
 }

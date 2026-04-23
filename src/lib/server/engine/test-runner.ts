@@ -1,7 +1,7 @@
-import { getEnv } from "$lib/server/env";
-import { uploadWorkflow, deleteWorkflow } from "$lib/server/wfp";
-import { testScriptName } from "$lib/server/workflows-store";
-import type { Event, RunError, RunLogEntry, Workflow } from "$lib/server/db/types";
+import { getEnv } from '$lib/server/env';
+import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
+import { buildSecretBindings, testScriptName } from '$lib/server/workflows-store';
+import type { Event, RunError, RunLogEntry, Workflow } from '$lib/server/db/types';
 
 export interface EphemeralRunResult {
 	ok: boolean;
@@ -21,44 +21,45 @@ interface InvokeResponseBody {
 function toRunError(err: unknown): RunError {
 	if (err instanceof Error) {
 		const out: RunError = {
-			name: err.name || "Error",
 			message: err.message || String(err),
+			name: err.name || 'Error'
 		};
-		if (err.stack) out.stack = err.stack;
+		if (err.stack) {
+			out.stack = err.stack;
+		}
 		return out;
 	}
-	if (typeof err === "object" && err !== null) {
+	if (typeof err === 'object' && err !== null) {
 		const anyErr = err as { name?: unknown; message?: unknown; stack?: unknown };
 		const out: RunError = {
-			name: typeof anyErr.name === "string" ? anyErr.name : "NonError",
-			message:
-				typeof anyErr.message === "string"
-					? anyErr.message
-					: safeStringify(err),
+			message: typeof anyErr.message === 'string' ? anyErr.message : safeStringify(err),
+			name: typeof anyErr.name === 'string' ? anyErr.name : 'NonError'
 		};
-		if (typeof anyErr.stack === "string") out.stack = anyErr.stack;
+		if (typeof anyErr.stack === 'string') {
+			out.stack = anyErr.stack;
+		}
 		return out;
 	}
-	return { name: "NonError", message: safeStringify(err) };
+	return { message: safeStringify(err), name: 'NonError' };
 }
 
 function safeStringify(v: unknown): string {
 	try {
-		return typeof v === "string" ? v : JSON.stringify(v);
+		return typeof v === 'string' ? v : JSON.stringify(v);
 	} catch {
 		return String(v);
 	}
 }
 
 function ephemeralNonce(): string {
-	const u = crypto.randomUUID().replace(/-/g, "");
+	const u = crypto.randomUUID().replaceAll(/-/g, '');
 	return u.slice(0, 8);
 }
 
 export async function runAgainstEventEphemeral(
 	sourceTs: string,
 	event: Event,
-	workflow: Workflow,
+	workflow: Workflow
 ): Promise<EphemeralRunResult> {
 	const started = Date.now();
 	const scriptName = testScriptName(workflow.id, ephemeralNonce());
@@ -66,83 +67,81 @@ export async function runAgainstEventEphemeral(
 	let uploaded = false;
 	try {
 		try {
-			await uploadWorkflow({ scriptName, userSourceTs: sourceTs });
+			const bindings = await buildSecretBindings(workflow.userId);
+			await uploadWorkflow({ bindings, scriptName, userSourceTs: sourceTs });
 			uploaded = true;
-		} catch (err) {
+		} catch (error) {
 			return {
 				ok: false,
-				error: toRunError(err),
+				error: toRunError(error),
 				logs: [],
-				durationMs: Date.now() - started,
+				durationMs: Date.now() - started
 			};
 		}
 
 		const env = getEnv();
-		let response: Awaited<ReturnType<ReturnType<typeof env.DISPATCHER.get>["fetch"]>>;
+		let response: Awaited<ReturnType<ReturnType<typeof env.DISPATCHER.get>['fetch']>>;
 		try {
-			response = await env.DISPATCHER.get(scriptName).fetch(
-				"https://workflow.invoke/",
-				{
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({
-						workflow: { id: workflow.id, name: workflow.name },
-						event: {
-							id: event.id,
-							triggerType: event.triggerType,
-							receivedAt: event.receivedAt,
-							payload: event.payload,
-						},
-					}),
-				},
-			);
-		} catch (err) {
+			response = await env.DISPATCHER.get(scriptName).fetch('https://workflow.invoke/', {
+				body: JSON.stringify({
+					workflow: { id: workflow.id, name: workflow.name },
+					event: {
+						id: event.id,
+						triggerType: event.triggerType,
+						receivedAt: event.receivedAt,
+						payload: event.payload
+					}
+				}),
+				headers: { 'content-type': 'application/json' },
+				method: 'POST'
+			});
+		} catch (error) {
 			return {
 				ok: false,
-				error: toRunError(err),
+				error: toRunError(error),
 				logs: [],
-				durationMs: Date.now() - started,
+				durationMs: Date.now() - started
 			};
 		}
 
 		let body: InvokeResponseBody;
 		try {
 			body = (await response.json()) as InvokeResponseBody;
-		} catch (err) {
+		} catch (error) {
 			return {
 				ok: false,
-				error: toRunError(err),
+				error: toRunError(error),
 				logs: [],
-				durationMs: Date.now() - started,
+				durationMs: Date.now() - started
 			};
 		}
 
 		const logs = body.logs ?? [];
 		if (body.ok) {
 			return {
-				ok: true,
-				result: body.result,
-				logs,
 				durationMs: Date.now() - started,
+				logs,
+				ok: true,
+				result: body.result
 			};
 		}
 		return {
-			ok: false,
+			durationMs: Date.now() - started,
 			error: body.error ?? {
-				name: "Error",
-				message: "workflow reported failure with no error",
+				name: 'Error',
+				message: 'workflow reported failure with no error'
 			},
 			logs,
-			durationMs: Date.now() - started,
+			ok: false
 		};
 	} finally {
 		if (uploaded) {
 			try {
 				await deleteWorkflow(scriptName);
-			} catch (err) {
-				console.error("test-runner: failed to delete ephemeral script", {
+			} catch (error) {
+				console.error('test-runner: failed to delete ephemeral script', {
 					scriptName,
-					error: err instanceof Error ? err.message : String(err),
+					error: error instanceof Error ? error.message : String(error)
 				});
 			}
 		}

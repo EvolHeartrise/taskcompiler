@@ -1,5 +1,5 @@
-import { getDb, now, uuid } from "../index.ts";
-import type { Event, EventTriggerType } from "../types.ts";
+import { getDb, now, uuid } from '../index.ts';
+import type { Event, EventTriggerType } from '../types.ts';
 
 interface EventRow {
 	id: string;
@@ -12,12 +12,12 @@ interface EventRow {
 
 function rowToEvent(row: EventRow): Event {
 	return {
+		dedupKey: row.dedup_key,
 		id: row.id,
-		workflowId: row.workflow_id,
-		triggerType: row.trigger_type,
 		payload: JSON.parse(row.payload_json) as unknown,
 		receivedAt: row.received_at,
-		dedupKey: row.dedup_key,
+		triggerType: row.trigger_type,
+		workflowId: row.workflow_id
 	};
 }
 
@@ -35,7 +35,7 @@ export async function createEvent(input: CreateEventInput): Promise<Event> {
 	await getDb()
 		.prepare(
 			`INSERT INTO events (id, workflow_id, trigger_type, payload_json, received_at, dedup_key)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
+			 VALUES (?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			id,
@@ -43,22 +43,18 @@ export async function createEvent(input: CreateEventInput): Promise<Event> {
 			input.triggerType,
 			JSON.stringify(input.payload ?? null),
 			receivedAt,
-			input.dedupKey ?? null,
+			input.dedupKey ?? null
 		)
 		.run();
-	const row = await getDb()
-		.prepare(`SELECT * FROM events WHERE id = ?`)
-		.bind(id)
-		.first<EventRow>();
-	if (!row) throw new Error(`createEvent: row missing after insert (id=${id})`);
+	const row = await getDb().prepare(`SELECT * FROM events WHERE id = ?`).bind(id).first<EventRow>();
+	if (!row) {
+		throw new Error(`createEvent: row missing after insert (id=${id})`);
+	}
 	return rowToEvent(row);
 }
 
 export async function getEvent(id: string): Promise<Event | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM events WHERE id = ?`)
-		.bind(id)
-		.first<EventRow>();
+	const row = await getDb().prepare(`SELECT * FROM events WHERE id = ?`).bind(id).first<EventRow>();
 	return row ? rowToEvent(row) : null;
 }
 
@@ -69,7 +65,7 @@ export interface ListEventsOptions {
 
 export async function listEventsForWorkflow(
 	workflowId: string,
-	opts: ListEventsOptions = {},
+	opts: ListEventsOptions = {}
 ): Promise<Event[]> {
 	const since = opts.since ?? 0;
 	const db = getDb();
@@ -77,13 +73,13 @@ export async function listEventsForWorkflow(
 		opts.limit !== undefined
 			? await db
 					.prepare(
-						`SELECT * FROM events WHERE workflow_id = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`,
+						`SELECT * FROM events WHERE workflow_id = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`
 					)
 					.bind(workflowId, since, opts.limit)
 					.all<EventRow>()
 			: await db
 					.prepare(
-						`SELECT * FROM events WHERE workflow_id = ? AND received_at >= ? ORDER BY received_at DESC`,
+						`SELECT * FROM events WHERE workflow_id = ? AND received_at >= ? ORDER BY received_at DESC`
 					)
 					.bind(workflowId, since)
 					.all<EventRow>();

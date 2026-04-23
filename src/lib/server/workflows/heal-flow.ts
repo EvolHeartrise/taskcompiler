@@ -1,12 +1,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { withEnv } from '$lib/server/env';
 import { healWorkflow } from '$lib/server/agent/roles/heal';
-import type { HealOutcome } from '$lib/server/agent/roles/heal';
 import {
-	runHealTestSweep,
-	deployHealedVersion,
 	agentEventsToTranscript,
-	computeDiff
+	computeDiff,
+	deployHealedVersion,
+	runHealTestSweep
 } from '$lib/server/healer/orchestrator';
 import {
 	createHealSession,
@@ -14,33 +13,37 @@ import {
 	updateHealSessionTranscript
 } from '$lib/server/db/queries/heals';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
-import type { HealTestResults } from '$lib/server/db/types';
+import type { HealTestResults, UnhealableCategory } from '$lib/server/db/types';
 
 export interface HealWorkflowParams {
 	workflowId: string;
 	triggeringRunId: string;
 }
 
-export type HealWorkflowStatus = 'agent_failed' | 'sweep_failed' | 'deploy_failed' | 'success';
+export type HealWorkflowStatus =
+	| 'agent_failed'
+	| 'sweep_failed'
+	| 'deploy_failed'
+	| 'needs_attention'
+	| 'success';
 
 export interface HealWorkflowResult {
 	status: HealWorkflowStatus;
 	healSessionId: string;
 	newVersionId?: string;
 	reason?: string;
+	unhealableCategory?: UnhealableCategory;
 }
 
 // Minimal serializable summary of the heal agent's outcome that we pass
-// between Workflow steps. The full HealOutcome contains `unknown`-typed
-// payloads (event payloads, tool args) that violate `Rpc.Serializable`'s
-// constraint when returned from `step.do`. The full transcript + test
-// details get persisted to the heal_session row inside the agent step
-// instead of being shuttled through subsequent steps.
-interface AgentStepSummary {
-	status: HealOutcome['status'];
-	sourceTs: string | null;
-	reason: string | null;
-}
+// Between Workflow steps. The full HealOutcome contains agent transcript
+// Entries with unknown-typed tool args, which violate Rpc.Serializable
+// When crossing step boundaries. Transcript + unhealable details get
+// Persisted to the heal_session row inside the agent step.
+type AgentStepSummary =
+	| { kind: 'fixed'; sourceTs: string; summary: string }
+	| { kind: 'unhealable'; category: UnhealableCategory; reason: string }
+	| { kind: 'failed' | 'abandoned'; reason: string };
 
 export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams> {
 	async run(
@@ -48,19 +51,19 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		step: WorkflowStep
 	): Promise<HealWorkflowResult> {
 		const { workflowId, triggeringRunId } = event.payload;
-		const env = this.env;
+		const { env } = this;
 
 		// Step 1: open heal_session row. Wrapped in step.do so re-runs of
-		// later steps don't double-insert.
+		// Later steps don't double-insert.
 		const healSessionId = await step.do('create-heal-session', async () =>
 			withEnv(env, async () => {
-				const session = await createHealSession({ workflowId, triggeringRunId });
+				const session = await createHealSession({ triggeringRunId, workflowId });
 				return session.id;
 			})
 		);
 
 		// Step 2: capture the pre-heal source for diff computation in
-		// failure branches. Reads only — safe to memoize.
+		// Failure branches. Reads only — safe to memoize.
 		const previousSourceTs = await step.do('read-current-source', async () =>
 			withEnv(env, async () => {
 				const cur = await getCurrentVersion(workflowId);
@@ -68,61 +71,71 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			})
 		);
 
-		// Step 3: run the heal agent. On non-success branches we persist
-		// the transcript directly to the heal_session row inside the same
-		// step so we don't need to ship the full HealOutcome through the
-		// step boundary (it contains unknown-typed payloads that violate
-		// Rpc.Serializable).
+		// Step 3: run the heal agent. Terminal branches (unhealable / failed /
+		// Abandoned) finalize the session row inline since we return from
+		// This step without doing a sweep/deploy. The transcript is persisted
+		// Inside the step so it never has to cross a step boundary.
 		const agentSummary = await step.do(
 			'agent-heal',
-			{ retries: { limit: 1, delay: '5 seconds' }, timeout: '5 minutes' },
+			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
 			async (): Promise<AgentStepSummary> =>
 				withEnv(env, async () => {
-					const outcome = await healWorkflow({ workflowId, triggeringRunId });
+					const outcome = await healWorkflow({ triggeringRunId, workflowId });
 					const transcript = agentEventsToTranscript(outcome.agentTranscript);
-					const testResults: HealTestResults = {
-						total: outcome.testResults.total,
-						passed: outcome.testResults.passed,
-						failed: outcome.testResults.failed,
-						details: outcome.testResults.details.map((d) => ({
-							eventId: d.eventId,
-							ok: d.ok,
-							...(d.error ? { error: d.error } : {})
-						}))
-					};
-					if (outcome.status !== 'success' || !outcome.sourceTs) {
-						// Terminal — finish the session row here; the workflow returns
-						// after this step.
-						await finishHealSession(healSessionId, {
-							status: outcome.status === 'success' ? 'failed' : outcome.status,
-							agentTranscript: transcript,
-							testResults,
-							diff: null,
-							newVersionId: null
-						});
+
+					if (outcome.kind === 'fixed') {
+						// Leave session `running`; downstream steps finalize.
+						await updateHealSessionTranscript(healSessionId, transcript);
 						return {
-							status: outcome.status,
-							sourceTs: null,
-							reason: outcome.reason ?? `agent stopped with status=${outcome.status}`
+							kind: 'fixed',
+							sourceTs: outcome.sourceTs,
+							summary: outcome.summary
 						};
 					}
-					// Success — persist the transcript now, but leave the session
-					// row in `running` state. Later steps overwrite the row when
-					// they finalize (success or fail).
-					await updateHealSessionTranscript(healSessionId, transcript);
-					return {
-						status: 'success',
-						sourceTs: outcome.sourceTs,
-						reason: outcome.reason ?? null
-					};
+
+					if (outcome.kind === 'unhealable') {
+						await finishHealSession(healSessionId, {
+							agentTranscript: transcript,
+							diff: null,
+							newVersionId: null,
+							status: 'needs_attention',
+							testResults: null,
+							unhealableCategory: outcome.category,
+							unhealableReason: outcome.reason
+						});
+						return {
+							category: outcome.category,
+							kind: 'unhealable',
+							reason: outcome.reason
+						};
+					}
+
+					// Failed | abandoned
+					await finishHealSession(healSessionId, {
+						agentTranscript: transcript,
+						diff: null,
+						newVersionId: null,
+						status: outcome.kind,
+						testResults: null
+					});
+					return { kind: outcome.kind, reason: outcome.reason };
 				})
 		);
 
-		if (agentSummary.status !== 'success' || !agentSummary.sourceTs) {
+		if (agentSummary.kind === 'unhealable') {
 			return {
-				status: 'agent_failed',
 				healSessionId,
-				reason: agentSummary.reason ?? `agent stopped with status=${agentSummary.status}`
+				reason: agentSummary.reason,
+				status: 'needs_attention',
+				unhealableCategory: agentSummary.category
+			};
+		}
+
+		if (agentSummary.kind !== 'fixed') {
+			return {
+				healSessionId,
+				reason: agentSummary.reason,
+				status: 'agent_failed'
 			};
 		}
 
@@ -131,7 +144,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		// Step 4: orchestrator-side authoritative test sweep.
 		const sweepResults = await step.do(
 			'test-sweep',
-			{ retries: { limit: 1, delay: '5 seconds' }, timeout: '10 minutes' },
+			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
 			async (): Promise<HealTestResults & { abortedEarly: boolean }> =>
 				withEnv(env, async () => {
 					const sweep = await runHealTestSweep(workflowId, candidateSourceTs);
@@ -143,86 +156,86 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			await step.do('finish-session-sweep-failed', async () =>
 				withEnv(env, async () => {
 					await finishHealSession(healSessionId, {
-						status: 'failed',
 						agentTranscript: null,
-						testResults: {
-							total: sweepResults.total,
-							passed: sweepResults.passed,
-							failed: sweepResults.failed,
-							details: sweepResults.details
-						},
 						diff:
 							previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
-						newVersionId: null
+						newVersionId: null,
+						status: 'failed',
+						testResults: {
+							details: sweepResults.details,
+							failed: sweepResults.failed,
+							passed: sweepResults.passed,
+							total: sweepResults.total
+						}
 					});
 					return { ok: true };
 				})
 			);
 			return {
-				status: 'sweep_failed',
 				healSessionId,
 				reason: sweepResults.abortedEarly
 					? `sweep aborted early after ${sweepResults.failed} failures`
-					: `sweep failed (${sweepResults.failed}/${sweepResults.total})`
+					: `sweep failed (${sweepResults.failed}/${sweepResults.total})`,
+				status: 'sweep_failed'
 			};
 		}
 
 		// Step 5: deploy + replay. The deploy step pulls the heal_session +
-		// healOutcome again via fresh DB reads inside its callback so no
-		// non-serializable data crosses the step boundary.
+		// HealOutcome again via fresh DB reads inside its callback so no
+		// Non-serializable data crosses the step boundary.
 		let deployedVersionId: string;
 		try {
 			deployedVersionId = await step.do(
 				'deploy-and-replay',
-				{ retries: { limit: 2, delay: '5 seconds' }, timeout: '5 minutes' },
+				{ retries: { delay: '5 seconds', limit: 2 }, timeout: '5 minutes' },
 				async (): Promise<string> =>
 					withEnv(env, async () => {
 						const result = await deployHealedVersion({
-							workflowId,
-							sourceTs: candidateSourceTs,
-							triggeringRunId,
 							healSessionId,
+							sourceTs: candidateSourceTs,
 							sweep: {
-								total: sweepResults.total,
-								passed: sweepResults.passed,
+								details: sweepResults.details,
 								failed: sweepResults.failed,
-								details: sweepResults.details
-							}
+								passed: sweepResults.passed,
+								total: sweepResults.total
+							},
+							triggeringRunId,
+							workflowId
 						});
 						return result.newVersionId;
 					})
 			);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			await step.do('finish-session-deploy-failed', async () =>
 				withEnv(env, async () => {
 					await finishHealSession(healSessionId, {
-						status: 'failed',
 						agentTranscript: null,
-						testResults: {
-							total: sweepResults.total,
-							passed: sweepResults.passed,
-							failed: sweepResults.failed,
-							details: sweepResults.details
-						},
 						diff:
 							previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
-						newVersionId: null
+						newVersionId: null,
+						status: 'failed',
+						testResults: {
+							details: sweepResults.details,
+							failed: sweepResults.failed,
+							passed: sweepResults.passed,
+							total: sweepResults.total
+						}
 					});
 					return { ok: true };
 				})
 			);
 			return {
-				status: 'deploy_failed',
 				healSessionId,
-				reason: `deploy threw: ${message}`
+				reason: `deploy threw: ${message}`,
+				status: 'deploy_failed'
 			};
 		}
 
 		return {
-			status: 'success',
 			healSessionId,
-			newVersionId: deployedVersionId
+			newVersionId: deployedVersionId,
+			status: 'success'
 		};
 	}
 }

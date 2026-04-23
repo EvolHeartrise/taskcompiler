@@ -23,8 +23,8 @@
 	<div>
 		<h1>New workflow</h1>
 		<p class="muted">
-			Describe what the workflow should do in plain English. An LLM will generate a TypeScript module
-			that runs on every trigger.
+			Describe what the workflow should do in plain English. An LLM will generate a TypeScript
+			module that runs on every trigger.
 		</p>
 	</div>
 	<a href={resolve('/')} class="back">← Back</a>

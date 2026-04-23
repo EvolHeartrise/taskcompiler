@@ -5,7 +5,6 @@ import { createVersion, getCurrentVersion } from '$lib/server/db/queries/version
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { finishHealSession, getHealSession } from '$lib/server/db/queries/heals';
 import { writeVersion } from '$lib/server/workflows-store';
-import type { HealOutcome } from '$lib/server/agent/roles/heal';
 import type { AgentEvent } from '$lib/server/agent';
 import type {
 	HealAgentTranscriptEntry,
@@ -101,22 +100,6 @@ export function computeDiff(oldSource: string, newSource: string): string {
 		j++;
 	}
 	return lines.join('\n');
-}
-
-export function outcomeTestResultsToDb(outcome: HealOutcome): HealTestResults {
-	const details: HealTestResultDetail[] = outcome.testResults.details.map((d) => {
-		const out: HealTestResultDetail = { eventId: d.eventId, ok: d.ok };
-		if (d.error) {
-			out.error = d.error;
-		}
-		return out;
-	});
-	return {
-		details,
-		failed: outcome.testResults.failed,
-		passed: outcome.testResults.passed,
-		total: outcome.testResults.total
-	};
 }
 
 /**

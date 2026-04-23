@@ -5,7 +5,11 @@ import { getWorkflowForUser } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion, getVersion, listVersions } from '$lib/server/db/queries/versions';
 import { listEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
-import { listHealSessionsForWorkflow } from '$lib/server/db/queries/heals';
+import {
+	getOpenNeedsAttentionSession,
+	listHealSessionsForWorkflow,
+	markHealSessionResolved
+} from '$lib/server/db/queries/heals';
 import { executeEvent, replayFailedEvents } from '$lib/server/engine';
 import { highlightTs } from '$lib/server/highlight';
 
@@ -28,7 +32,9 @@ async function fetchInstanceStatus(
 		const instance = await binding.get(instanceId);
 		const status = await instance.status();
 		const out: InFlightStatus = { status: status.status };
-		if (status.error) out.error = status.error;
+		if (status.error) {
+			out.error = status.error;
+		}
 		return out;
 	} catch {
 		return undefined;
@@ -36,22 +42,28 @@ async function fetchInstanceStatus(
 }
 
 export const load: PageServerLoad = async ({ params, url, platform, locals }) => {
-	if (!locals.user) error(401, 'unauthorized');
+	if (!locals.user) {
+		error(401, 'unauthorized');
+	}
 	const workflow = await getWorkflowForUser(params.workflowId, locals.user.id);
-	if (!workflow) error(404, 'Workflow not found');
+	if (!workflow) {
+		error(404, 'Workflow not found');
+	}
 
-	const [currentVersion, versions, events, allRuns, failedRuns, heals] = await Promise.all([
-		getCurrentVersion(workflow.id),
-		listVersions(workflow.id),
-		listEventsForWorkflow(workflow.id, { limit: 50 }),
-		listRunsForWorkflow(workflow.id),
-		listFailedRunsForWorkflow(workflow.id),
-		listHealSessionsForWorkflow(workflow.id)
-	]);
+	const [currentVersion, versions, events, allRuns, failedRuns, heals, needsAttention] =
+		await Promise.all([
+			getCurrentVersion(workflow.id),
+			listVersions(workflow.id),
+			listEventsForWorkflow(workflow.id, { limit: 50 }),
+			listRunsForWorkflow(workflow.id),
+			listFailedRunsForWorkflow(workflow.id),
+			listHealSessionsForWorkflow(workflow.id),
+			getOpenNeedsAttentionSession(workflow.id)
+		]);
 	const runs = allRuns.slice(0, 50);
 
 	const totalRuns = allRuns.length;
-	const totalEvents = (await listEventsForWorkflow(workflow.id, { limit: 10000 })).length;
+	const totalEvents = (await listEventsForWorkflow(workflow.id, { limit: 10_000 })).length;
 
 	const selectedVersionId = url.searchParams.get('version');
 	const selectedVersion =
@@ -63,11 +75,13 @@ export const load: PageServerLoad = async ({ params, url, platform, locals }) =>
 
 	const inFlight: InFlightInfo = {};
 	if (platform) {
-		const env = platform.env;
+		const { env } = platform;
 
 		if (workflow.currentVersionId === null) {
 			const gen = await fetchInstanceStatus(env.GEN_WORKFLOW, `gen-${workflow.id}`);
-			if (gen) inFlight.gen = gen;
+			if (gen) {
+				inFlight.gen = gen;
+			}
 		}
 
 		const latestHeal = heals[0];
@@ -84,33 +98,62 @@ export const load: PageServerLoad = async ({ params, url, platform, locals }) =>
 	}
 
 	return {
-		workflow,
 		currentVersion,
-		selectedVersion,
-		selectedVersionSourceHtml,
-		versions,
 		events,
-		runs,
 		failedRuns,
 		heals,
+		inFlight,
+		needsAttention,
+		origin: url.origin,
+		runs,
+		selectedVersion,
+		selectedVersionSourceHtml,
 		stats: {
 			totalEvents,
-			totalRuns,
 			totalFailed: failedRuns.length,
-			totalHeals: heals.length
+			totalHeals: heals.length,
+			totalRuns
 		},
-		inFlight,
-		origin: url.origin
+		versions,
+		workflow
 	};
 };
 
 async function assertOwnership(workflowId: string, userId: string | undefined): Promise<void> {
-	if (!userId) error(401, 'unauthorized');
+	if (!userId) {
+		error(401, 'unauthorized');
+	}
 	const wf = await getWorkflowForUser(workflowId, userId);
-	if (!wf) error(404, 'Workflow not found');
+	if (!wf) {
+		error(404, 'Workflow not found');
+	}
 }
 
 export const actions: Actions = {
+	resume: async ({ params, locals }) => {
+		await assertOwnership(params.workflowId, locals.user?.id);
+		try {
+			const session = await getOpenNeedsAttentionSession(params.workflowId);
+			if (!session) {
+				return fail(409, { resume: { error: 'No needs_attention session to resolve.' } });
+			}
+			await markHealSessionResolved(session.id);
+			const replay = await replayFailedEvents(params.workflowId);
+			return {
+				resume: {
+					ok: true,
+					sessionId: session.id,
+					attempted: replay.attempted,
+					okCount: replay.ok,
+					failedCount: replay.failed
+				}
+			};
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			return fail(500, { resume: { error: msg } });
+		}
+	},
+
 	trigger: async ({ params, request, locals }) => {
 		await assertOwnership(params.workflowId, locals.user?.id);
 
@@ -144,24 +187,6 @@ export const actions: Actions = {
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return fail(500, { trigger: { error: msg } });
-		}
-	},
-
-	replay: async ({ params, locals }) => {
-		await assertOwnership(params.workflowId, locals.user?.id);
-		try {
-			const result = await replayFailedEvents(params.workflowId);
-			return {
-				replay: {
-					ok: true,
-					attempted: result.attempted,
-					okCount: result.ok,
-					failedCount: result.failed
-				}
-			};
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(500, { replay: { error: msg } });
 		}
 	}
 };
