@@ -13,9 +13,11 @@ import { TS_LIB_FILES } from './ts-lib.generated';
 
 const LIB_DIR = '/lib/';
 const CTX_FILENAME = '/ctx.d.ts';
+const EVENT_TYPE_FILENAME = '/event-type.d.ts';
 const WORKFLOW_FILENAME = '/workflow.ts';
 const SECRET_PLACEHOLDER = '/* __RUNELY_SECRET_NAMES__ */ never';
 const MAX_REPORTED_DIAGNOSTICS = 20;
+const DEFAULT_EVENT_TYPE = `type WorkflowEvent = { body: unknown; headers: { [key: string]: string | undefined } };`;
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
 	allowSyntheticDefaultImports: true,
@@ -52,6 +54,7 @@ function init(): ServiceState {
 		scripts.set(LIB_DIR + name, { text, version: 0 });
 	}
 	scripts.set(CTX_FILENAME, { text: renderCtxDts([]), version: 0 });
+	scripts.set(EVENT_TYPE_FILENAME, { text: DEFAULT_EVENT_TYPE, version: 0 });
 	scripts.set(WORKFLOW_FILENAME, { text: '', version: 0 });
 
 	const host: ts.LanguageServiceHost = {
@@ -59,9 +62,9 @@ function init(): ServiceState {
 		fileExists: (name) => scripts.has(name),
 		getCompilationSettings: () => COMPILER_OPTIONS,
 		getCurrentDirectory: () => '/',
-		getDefaultLibFileName: () => LIB_DIR + 'lib.es2023.d.ts',
+		getDefaultLibFileName: () => `${LIB_DIR}lib.es2023.d.ts`,
 		getDirectories: () => [],
-		getScriptFileNames: () => [CTX_FILENAME, WORKFLOW_FILENAME],
+		getScriptFileNames: () => [CTX_FILENAME, EVENT_TYPE_FILENAME, WORKFLOW_FILENAME],
 		getScriptSnapshot: (name) => {
 			const s = scripts.get(name);
 			return s ? ts.ScriptSnapshot.fromString(s.text) : undefined;
@@ -87,13 +90,23 @@ export interface TypecheckResult {
 }
 
 /**
- * Type-check agent-generated workflow source. `secretNames` is the list of
- * secret names currently defined for the owning project — the `ctx.secret`
- * parameter type is narrowed to a union of these literals (or `never` when
- * the project has no secrets), so `ctx.secret("TYPO")` surfaces as a TS
- * error with the valid names listed in the message.
+ * Type-check agent-generated workflow source.
+ *
+ * `secretNames` narrows `ctx.secret` to a union of the project's actual
+ * secret names — `ctx.secret("TYPO")` becomes a TS error.
+ *
+ * `workflowEventTypeTs` is the `type WorkflowEvent = ...` declaration
+ * inferred from this workflow's historical events. When provided, it
+ * replaces the permissive default so `event.body.foo` accesses validate
+ * against the real shape. Pass null/undefined to fall back to the default
+ * (used by cron workflows and any other path that doesn't have an inferred
+ * type yet).
  */
-export function typecheckWorkflow(secretNames: readonly string[], source: string): TypecheckResult {
+export function typecheckWorkflow(
+	secretNames: readonly string[],
+	source: string,
+	workflowEventTypeTs?: string | null
+): TypecheckResult {
 	const { service, scripts } = init();
 
 	const ctxText = renderCtxDts([...secretNames].toSorted());
@@ -104,6 +117,19 @@ export function typecheckWorkflow(secretNames: readonly string[], source: string
 	if (ctxScript.text !== ctxText) {
 		ctxScript.text = ctxText;
 		ctxScript.version += 1;
+	}
+
+	const eventText =
+		workflowEventTypeTs && workflowEventTypeTs.trim().length > 0
+			? workflowEventTypeTs
+			: DEFAULT_EVENT_TYPE;
+	const eventScript = scripts.get(EVENT_TYPE_FILENAME);
+	if (!eventScript) {
+		throw new Error('typecheck: event type script missing');
+	}
+	if (eventScript.text !== eventText) {
+		eventScript.text = eventText;
+		eventScript.version += 1;
 	}
 
 	const wfScript = scripts.get(WORKFLOW_FILENAME);
@@ -138,7 +164,9 @@ function formatDiagnostic(d: ts.Diagnostic): string {
 				? 'workflow.ts'
 				: d.file.fileName === CTX_FILENAME
 					? 'ctx.d.ts'
-					: d.file.fileName;
+					: d.file.fileName === EVENT_TYPE_FILENAME
+						? 'event-type.d.ts'
+						: d.file.fileName;
 		return `${shortName}:${line + 1}:${character + 1} - error TS${d.code}: ${msg}`;
 	}
 	return `error TS${d.code}: ${msg}`;

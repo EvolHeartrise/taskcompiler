@@ -94,17 +94,21 @@ export interface EmitWorkflowEventOptions {
 	exportName?: string;
 }
 
+// Emits the type with no `export` keyword so a no-imports .d.ts file containing
+// It stays in script (ambient) mode — that's what makes `WorkflowEvent` visible
+// To the workflow source without requiring an import the agent is forbidden
+// From writing. The same string is also shown to the agent in the prompt.
 export function emitWorkflowEventType(
 	shapes: Shape[],
 	opts: EmitWorkflowEventOptions = {}
 ): string {
 	const name = opts.exportName ?? 'WorkflowEvent';
 	if (shapes.length === 0) {
-		return `export type ${name} = { body: unknown; headers: { ${HEADERS_INDEX_SIG} } };`;
+		return `type ${name} = { body: unknown; headers: { ${HEADERS_INDEX_SIG} } };`;
 	}
 	if (shapes.length === 1) {
-		return `export type ${name} = ${emitTopLevelVariant(shapes[0]!, '')};`;
+		return `type ${name} = ${emitTopLevelVariant(shapes[0]!, '')};`;
 	}
 	const variants = shapes.map((s) => emitTopLevelVariant(s, '  '));
-	return `export type ${name} =\n  | ${variants.join('\n  | ')};`;
+	return `type ${name} =\n  | ${variants.join('\n  | ')};`;
 }
