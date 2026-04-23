@@ -67,9 +67,6 @@ type DispatchOutcome =
 const DISPATCH_MAX_ATTEMPTS = 4;
 const DISPATCH_BASE_DELAY_MS = 200;
 
-const DB_MAX_ATTEMPTS = 3;
-const DB_BASE_DELAY_MS = 150;
-
 const chains = new Map<string, Promise<unknown>>();
 
 function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -112,30 +109,6 @@ async function retryWithBackoff<T>(
 		}
 	}
 	return last;
-}
-
-async function withDbRetry<T>(label: string, fn: () => Promise<T>): Promise<T> {
-	let lastErr: unknown;
-	const result = await retryWithBackoff<T>(
-		`db:${label}`,
-		DB_MAX_ATTEMPTS,
-		DB_BASE_DELAY_MS,
-		async () => {
-			try {
-				return { done: true, value: await fn() };
-			} catch (error) {
-				lastErr = error;
-				return {
-					done: false,
-					reason: error instanceof Error ? error.message : String(error)
-				};
-			}
-		}
-	);
-	if (result.done) {
-		return result.value;
-	}
-	throw lastErr;
 }
 
 async function dispatchOnce(args: {
@@ -348,7 +321,7 @@ export async function executeExistingEventForWorkflow(
 		});
 
 		if (outcome.kind === 'ok') {
-			await withDbRetry('finishRunOk', () => finishRunOk(run.id, outcome.result, outcome.logs));
+			await finishRunOk(run.id, outcome.result, outcome.logs);
 			return {
 				eventId: event.id,
 				result: outcome.result,
@@ -362,7 +335,7 @@ export async function executeExistingEventForWorkflow(
 		// Failures spawn a heal below.
 		const runError = outcome.error;
 		const runLogs = outcome.kind === 'user_error' ? outcome.logs : [];
-		await withDbRetry('finishRunFailed', () => finishRunFailed(run.id, runError, runLogs));
+		await finishRunFailed(run.id, runError, runLogs);
 
 		if (outcome.kind === 'infra_error') {
 			console.error(
