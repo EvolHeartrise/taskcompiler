@@ -1,4 +1,4 @@
-import { getDb, now, parseJson, uuid } from '../index.ts';
+import { getDb, mapRow, now, parseJson, uuid } from '../index.ts';
 import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
 
 interface RunRow {
@@ -16,20 +16,15 @@ interface RunRow {
 	parent_run_id: string | null;
 }
 
+const RUN_JSON_COLS = ['error_json', 'result_json', 'logs_json', 'is_replay'] as const;
+
 function rowToRun(row: RunRow): Run {
 	return {
+		...mapRow<Omit<Run, 'error' | 'result' | 'logs' | 'isReplay'>>(row, RUN_JSON_COLS),
 		error: parseJson<RunError>(row.error_json),
-		eventId: row.event_id,
-		finishedAt: row.finished_at,
-		id: row.id,
 		isReplay: row.is_replay !== 0,
 		logs: parseJson<RunLogEntry[]>(row.logs_json),
-		parentRunId: row.parent_run_id,
-		result: row.result_json === null ? null : (JSON.parse(row.result_json) as unknown),
-		startedAt: row.started_at,
-		status: row.status,
-		versionId: row.version_id,
-		workflowId: row.workflow_id
+		result: row.result_json === null ? null : (JSON.parse(row.result_json) as unknown)
 	};
 }
 

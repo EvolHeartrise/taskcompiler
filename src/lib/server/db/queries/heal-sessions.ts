@@ -1,4 +1,4 @@
-import { getDb, now, parseJson, uuid } from '../index.ts';
+import { getDb, mapRow, now, parseJson, uuid } from '../index.ts';
 import type {
 	HealAgentTranscriptEntry,
 	HealSession,
@@ -23,21 +23,13 @@ interface HealSessionRow {
 	resolved_at: number | null;
 }
 
+const HEAL_JSON_COLS = ['test_results_json', 'agent_transcript_json'] as const;
+
 function rowToHealSession(row: HealSessionRow): HealSession {
 	return {
+		...mapRow<Omit<HealSession, 'testResults' | 'agentTranscript'>>(row, HEAL_JSON_COLS),
 		agentTranscript: parseJson<HealAgentTranscriptEntry[]>(row.agent_transcript_json),
-		diff: row.diff,
-		finishedAt: row.finished_at,
-		id: row.id,
-		newVersionId: row.new_version_id,
-		resolvedAt: row.resolved_at,
-		startedAt: row.started_at,
-		status: row.status,
-		testResults: parseJson<HealTestResults>(row.test_results_json),
-		triggeringRunId: row.triggering_run_id,
-		unhealableCategory: row.unhealable_category,
-		unhealableReason: row.unhealable_reason,
-		workflowId: row.workflow_id
+		testResults: parseJson<HealTestResults>(row.test_results_json)
 	};
 }
 

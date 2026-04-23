@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
 import type { Event, EventTriggerType } from '../types.ts';
 
 interface EventRow {
@@ -13,13 +13,9 @@ interface EventRow {
 
 function rowToEvent(row: EventRow): Event {
 	return {
-		dedupKey: row.dedup_key,
-		eventSourceId: row.event_source_id,
+		...mapRow<Omit<Event, 'payload' | 'headers'>>(row, ['payload_json', 'headers_json']),
 		headers: JSON.parse(row.headers_json) as Record<string, string>,
-		id: row.id,
-		payload: JSON.parse(row.payload_json) as unknown,
-		receivedAt: row.received_at,
-		triggerType: row.trigger_type
+		payload: JSON.parse(row.payload_json) as unknown
 	};
 }
 
