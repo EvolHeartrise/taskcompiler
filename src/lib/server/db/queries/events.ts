@@ -141,3 +141,21 @@ export async function countEventsForSource(sourceId: string): Promise<number> {
 		.first<{ count: number }>();
 	return row?.count ?? 0;
 }
+
+// Batched event counts for a project — one query instead of N per-source
+// Counts from the home loader.
+export async function countEventsBySourceForProject(
+	projectId: string
+): Promise<Map<string, number>> {
+	const res = await getDb()
+		.prepare(
+			`SELECT e.event_source_id AS source_id, COUNT(*) AS count
+			 FROM events e
+			 JOIN event_sources s ON s.id = e.event_source_id
+			 WHERE s.project_id = ?
+			 GROUP BY e.event_source_id`
+		)
+		.bind(projectId)
+		.all<{ source_id: string; count: number }>();
+	return new Map(res.results.map((r) => [r.source_id, r.count]));
+}

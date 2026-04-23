@@ -126,6 +126,36 @@ export async function listFailedRunsForWorkflow(workflowId: string): Promise<Run
 	return res.results.map(rowToRun);
 }
 
+export interface RunStats {
+	total: number;
+	failed: number;
+}
+
+// Batched run stats per workflow for a project — one query instead of N
+// Per-workflow list lookups from the home loader.
+export async function getRunStatsForProject(projectId: string): Promise<Map<string, RunStats>> {
+	const res = await getDb()
+		.prepare(
+			`SELECT r.workflow_id AS workflow_id, r.status AS status, COUNT(*) AS count
+			 FROM runs r
+			 JOIN workflows w ON w.id = r.workflow_id
+			 WHERE w.project_id = ?
+			 GROUP BY r.workflow_id, r.status`
+		)
+		.bind(projectId)
+		.all<{ workflow_id: string; status: RunStatus; count: number }>();
+	const stats = new Map<string, RunStats>();
+	for (const row of res.results) {
+		const curr = stats.get(row.workflow_id) ?? { failed: 0, total: 0 };
+		curr.total += row.count;
+		if (row.status === 'failed') {
+			curr.failed += row.count;
+		}
+		stats.set(row.workflow_id, curr);
+	}
+	return stats;
+}
+
 export async function listFailedRunsByEvent(workflowId: string): Promise<Run[]> {
 	const res = await getDb()
 		.prepare(
