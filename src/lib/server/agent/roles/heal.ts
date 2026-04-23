@@ -6,7 +6,7 @@ import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/event
 import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
-import { typecheckWorkflow } from '$lib/server/typecheck/service';
+import { typecheckWorkflow } from '../typecheck/service';
 import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
 
 export interface HealOptions {

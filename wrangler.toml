@@ -10,7 +10,7 @@ compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]
 
 # The `typescript` compiler is bundled by the agent-code typecheck service
-# (src/lib/server/typecheck/service.ts). Its CJS init code uses `__filename`
+# (src/lib/server/agent/typecheck/service.ts). Its CJS init code uses `__filename`
 # and `__dirname` as lexical identifiers to feature-detect its Node sys host,
 # which Workers doesn't define. Substitute harmless placeholders at bundle
 # time — the code paths that consume them only matter for Node's real fs
