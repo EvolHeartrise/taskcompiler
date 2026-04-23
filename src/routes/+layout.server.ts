@@ -1,13 +1,13 @@
 import type { LayoutServerLoad } from './$types';
-import { listWorkflowsForUser } from '$lib/server/db/queries/workflows';
+import { listProjectsForUser } from '$lib/server/db/queries/projects';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
 	if (!locals.user) {
-		return { user: null, workflows: [] };
+		return { projects: [], user: null };
 	}
-	const workflows = await listWorkflowsForUser(locals.user.id);
+	const projects = await listProjectsForUser(locals.user.id);
 	return {
-		user: locals.user,
-		workflows: workflows.map((w) => ({ id: w.id, name: w.name }))
+		projects: projects.map((p) => ({ id: p.id, name: p.name })),
+		user: locals.user
 	};
 };

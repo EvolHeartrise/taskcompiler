@@ -1,33 +1,27 @@
-import { error, fail } from '@sveltejs/kit';
+import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import {
 	deleteSecret,
 	isValidSecretName,
-	listSecretNamesForUser,
+	listSecretNamesForProject,
 	upsertSecret
 } from '$lib/server/db/queries/secrets';
 
-export const load: PageServerLoad = async ({ locals }) => {
-	if (!locals.user) {
-		error(401, 'unauthorized');
-	}
-	const secrets = await listSecretNamesForUser(locals.user.id);
+// Project ownership is enforced by /p/[projectId]/+layout.server.ts.
+export const load: PageServerLoad = async ({ params }) => {
+	const secrets = await listSecretNamesForProject(params.projectId);
 	return { secrets };
 };
 
 export const actions: Actions = {
-	delete: async ({ request, locals }) => {
-		if (!locals.user) {
-			error(401, 'unauthorized');
-		}
-		const userId = locals.user.id;
+	delete: async ({ request, params }) => {
 		const data = await request.formData();
 		const name = (data.get('name') ?? '').toString().trim();
 		if (!name) {
 			return fail(400, { delete: { error: 'Name is required.' } });
 		}
 		try {
-			await deleteSecret(userId, name);
+			await deleteSecret(params.projectId, name);
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { delete: { error: msg } });
@@ -35,11 +29,7 @@ export const actions: Actions = {
 		return { delete: { name, ok: true } };
 	},
 
-	upsert: async ({ request, locals }) => {
-		if (!locals.user) {
-			error(401, 'unauthorized');
-		}
-		const userId = locals.user.id;
+	upsert: async ({ request, params }) => {
 		const data = await request.formData();
 		const rawName = (data.get('name') ?? '').toString().trim();
 		const value = (data.get('value') ?? '').toString();
@@ -61,7 +51,7 @@ export const actions: Actions = {
 		}
 
 		try {
-			await upsertSecret(userId, name, value);
+			await upsertSecret(params.projectId, name, value);
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { upsert: { error: msg } });

@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Workflow } from '@cloudflare/workers-types';
 import type { Actions, PageServerLoad } from './$types';
-import { getWorkflowForUser } from '$lib/server/db/queries/workflows';
+import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion, getVersion, listVersions } from '$lib/server/db/queries/versions';
 import { listEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
@@ -42,11 +42,10 @@ async function fetchInstanceStatus(
 	}
 }
 
-export const load: PageServerLoad = async ({ params, url, platform, locals }) => {
-	if (!locals.user) {
-		error(401, 'unauthorized');
-	}
-	const workflow = await getWorkflowForUser(params.workflowId, locals.user.id);
+// Project ownership is enforced by /p/[projectId]/+layout.server.ts. We still
+// Scope the workflow lookup by project so /p/A/w/[id-of-B-workflow] 404s.
+export const load: PageServerLoad = async ({ params, url, platform }) => {
+	const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
 	if (!workflow) {
 		error(404, 'Workflow not found');
 	}
@@ -120,21 +119,19 @@ export const load: PageServerLoad = async ({ params, url, platform, locals }) =>
 	};
 };
 
-async function assertOwnership(workflowId: string, userId: string | undefined): Promise<void> {
-	if (!userId) {
-		error(401, 'unauthorized');
-	}
-	const wf = await getWorkflowForUser(workflowId, userId);
+async function assertOwnership(workflowId: string, projectId: string): Promise<void> {
+	const wf = await getWorkflowForProject(workflowId, projectId);
 	if (!wf) {
 		error(404, 'Workflow not found');
 	}
 }
 
 export const actions: Actions = {
-	delete: async ({ params, request, locals }) => {
-		if (!locals.user) error(401, 'unauthorized');
-		const workflow = await getWorkflowForUser(params.workflowId, locals.user.id);
-		if (!workflow) error(404, 'Workflow not found');
+	delete: async ({ params, request }) => {
+		const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
+		if (!workflow) {
+			error(404, 'Workflow not found');
+		}
 
 		const data = await request.formData();
 		const confirmName = (data.get('confirm_name') ?? '').toString();
@@ -148,15 +145,15 @@ export const actions: Actions = {
 
 		try {
 			await tearDownWorkflow(workflow.id);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { delete: { error: `Delete failed: ${msg}` } });
 		}
-		redirect(303, '/');
+		redirect(303, `/p/${params.projectId}`);
 	},
 
-	resume: async ({ params, locals }) => {
-		await assertOwnership(params.workflowId, locals.user?.id);
+	resume: async ({ params }) => {
+		await assertOwnership(params.workflowId, params.projectId);
 		try {
 			const session = await getOpenNeedsAttentionSession(params.workflowId);
 			if (!session) {
@@ -166,21 +163,21 @@ export const actions: Actions = {
 			const replay = await replayFailedEvents(params.workflowId);
 			return {
 				resume: {
-					ok: true,
-					sessionId: session.id,
 					attempted: replay.attempted,
+					failedCount: replay.failed,
+					ok: true,
 					okCount: replay.ok,
-					failedCount: replay.failed
+					sessionId: session.id
 				}
 			};
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { resume: { error: msg } });
 		}
 	},
 
-	trigger: async ({ params, request, locals }) => {
-		await assertOwnership(params.workflowId, locals.user?.id);
+	trigger: async ({ params, request }) => {
+		await assertOwnership(params.workflowId, params.projectId);
 
 		const data = await request.formData();
 		const raw = (data.get('payload') ?? '').toString();
@@ -188,29 +185,29 @@ export const actions: Actions = {
 		let payload: unknown;
 		try {
 			payload = raw.trim() === '' ? {} : JSON.parse(raw);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
 			return fail(400, { trigger: { error: `Invalid JSON: ${msg}` } });
 		}
 
 		try {
 			const result = await executeEvent({
-				workflowId: params.workflowId,
+				payload,
 				trigger: 'manual',
-				payload
+				workflowId: params.workflowId
 			});
 			return {
 				trigger: {
-					ok: true,
+					error: result.error ?? null,
 					eventId: result.eventId,
-					runId: result.runId,
-					status: result.status,
+					ok: true,
 					result: result.result ?? null,
-					error: result.error ?? null
+					runId: result.runId,
+					status: result.status
 				}
 			};
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
 			return fail(500, { trigger: { error: msg } });
 		}
 	}

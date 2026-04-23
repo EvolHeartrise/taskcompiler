@@ -14,10 +14,30 @@
 		await goto(resolve('/auth'));
 	}
 
+	// URL is the source of truth for the active project. These read-only
+	// derivations come straight from page.params / page.data so the sidebar
+	// always reflects the URL — across tabs, in browser history, etc.
+	let activeProjectId = $derived<string | null>(page.params.projectId ?? null);
+	let projectWorkflows = $derived<Array<{ id: string; name: string }>>(
+		(page.data as { workflows?: Array<{ id: string; name: string }> }).workflows ?? []
+	);
 	let currentWorkflowId = $derived(page.params.workflowId ?? null);
-	let isOnHome = $derived(page.url.pathname === '/');
-	let isOnNew = $derived(page.url.pathname.startsWith('/new'));
-	let isOnSecrets = $derived(page.url.pathname.startsWith('/settings/secrets'));
+
+	let isOnProjectHome = $derived(
+		activeProjectId !== null && page.url.pathname === `/p/${activeProjectId}`
+	);
+	let isOnNew = $derived(page.url.pathname.endsWith('/new'));
+	let isOnSecrets = $derived(page.url.pathname.endsWith('/secrets'));
+	let isOnProjects = $derived(page.url.pathname.startsWith('/projects'));
+
+	async function onProjectChange(e: Event) {
+		const next = (e.currentTarget as HTMLSelectElement).value;
+		if (!next || next === activeProjectId) return;
+		// Switch to the project's home. We could try to preserve the current
+		// sub-page (e.g. /secrets), but workflow ids are project-scoped so
+		// /w/[id] would 404 anyway. Project root is always safe.
+		await goto(resolve('/p/[projectId]', { projectId: next }));
+	}
 </script>
 
 <svelte:head>
@@ -34,32 +54,74 @@
 					<span>Runely</span>
 				</a>
 
-				<nav class="primary" aria-label="Primary">
-					<a href={resolve('/')} class="nav-link" class:active={isOnHome}>Workflows</a>
-					<a href={resolve('/new')} class="nav-link new" class:active={isOnNew}>+ New workflow</a>
-					<a href={resolve('/settings/secrets')} class="nav-link" class:active={isOnSecrets}>
-						Secrets
-					</a>
-				</nav>
-
-				{#if data.workflows.length > 0}
-					<div class="section">
-						<div class="section-title">Your workflows</div>
-						<ul class="wf-list">
-							{#each data.workflows as w (w.id)}
-								<li>
-									<a
-										href={resolve('/w/[workflowId]', { workflowId: w.id })}
-										class="wf-link"
-										class:active={currentWorkflowId === w.id}
-										title={w.name}
-									>
-										{w.name}
-									</a>
-								</li>
+				{#if data.projects.length > 0}
+					<div class="project-switcher">
+						<div class="ps-label">Project</div>
+						<select
+							aria-label="Active project"
+							value={activeProjectId ?? ''}
+							onchange={onProjectChange}
+						>
+							{#if activeProjectId === null}
+								<option value="" disabled>Select a project…</option>
+							{/if}
+							{#each data.projects as p (p.id)}
+								<option value={p.id}>{p.name}</option>
 							{/each}
-						</ul>
+						</select>
+						<a href={resolve('/projects')} class="ps-manage" class:active={isOnProjects}>
+							Manage projects
+						</a>
 					</div>
+				{/if}
+
+				{#if activeProjectId !== null}
+					<nav class="primary" aria-label="Primary">
+						<a
+							href={resolve('/p/[projectId]', { projectId: activeProjectId })}
+							class="nav-link"
+							class:active={isOnProjectHome}
+						>
+							Workflows
+						</a>
+						<a
+							href={resolve('/p/[projectId]/new', { projectId: activeProjectId })}
+							class="nav-link new"
+							class:active={isOnNew}
+						>
+							+ New workflow
+						</a>
+						<a
+							href={resolve('/p/[projectId]/secrets', { projectId: activeProjectId })}
+							class="nav-link"
+							class:active={isOnSecrets}
+						>
+							Secrets
+						</a>
+					</nav>
+
+					{#if projectWorkflows.length > 0}
+						<div class="section">
+							<div class="section-title">Workflows in this project</div>
+							<ul class="wf-list">
+								{#each projectWorkflows as w (w.id)}
+									<li>
+										<a
+											href={resolve('/p/[projectId]/w/[workflowId]', {
+												projectId: activeProjectId,
+												workflowId: w.id
+											})}
+											class="wf-link"
+											class:active={currentWorkflowId === w.id}
+											title={w.name}
+										>
+											{w.name}
+										</a>
+									</li>
+								{/each}
+							</ul>
+						</div>
+					{/if}
 				{/if}
 
 				<div class="spacer"></div>
@@ -150,6 +212,47 @@
 	.brand-icon {
 		width: 22px;
 		height: 22px;
+	}
+	.project-switcher {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		padding: 6px 8px 10px;
+		border-bottom: 1px solid #f1f5f9;
+		margin-bottom: 10px;
+	}
+	.ps-label {
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: #6b7280;
+	}
+	.project-switcher select {
+		width: 100%;
+		padding: 6px 8px;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		background: #fff;
+		color: #111;
+		font: inherit;
+		font-size: 13px;
+		cursor: pointer;
+	}
+	.project-switcher select:hover {
+		border-color: #9ca3af;
+	}
+	.ps-manage {
+		font-size: 12px;
+		color: #6b7280;
+		padding: 2px 0 0;
+	}
+	.ps-manage:hover {
+		color: #111;
+	}
+	.ps-manage.active {
+		color: #111;
+		font-weight: 600;
 	}
 	.primary {
 		display: flex;

@@ -8,6 +8,7 @@
 	import type { Event, HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
 
 	let { data, form }: PageProps = $props();
+	let projectId = $derived(page.params.projectId!);
 
 	let genInFlight = $derived(
 		data.inFlight.gen?.status === 'running' || data.inFlight.gen?.status === 'queued'
@@ -92,9 +93,8 @@
 	}
 
 	function triggerLabel(t: string, cron: string | null): string {
-		if (t === 'webhook') return 'webhook';
 		if (t === 'cron') return cron ? `cron (${cron})` : 'cron';
-		return cron ? `both (${cron})` : 'both';
+		return 'webhook';
 	}
 
 	// Expand state for rows
@@ -173,7 +173,7 @@
 <div class="head">
 	<div>
 		<div class="crumbs">
-			<a href={resolve('/')}>← Workflows</a>
+			<a href={resolve('/p/[projectId]', { projectId })}>← Workflows</a>
 		</div>
 		<h1>{data.workflow.name}</h1>
 		<div class="meta">
@@ -192,9 +192,10 @@
 		<a
 			class="tab"
 			class:active={activeTab === t.id}
-			href={resolve(`/w/[workflowId]?${tabQuery(t.id)}` as `/w/[workflowId]?${string}`, {
-				workflowId: data.workflow.id
-			})}
+			href={resolve(
+				`/p/[projectId]/w/[workflowId]?${tabQuery(t.id)}` as `/p/[projectId]/w/[workflowId]?${string}`,
+				{ projectId, workflowId: data.workflow.id }
+			)}
 		>
 			{t.label}
 			{#if t.id === 'failures' && data.stats.totalFailed > 0}
@@ -289,18 +290,30 @@
 			</div>
 		</div>
 
-		<div class="card">
-			<h2>Webhook URL</h2>
-			<div class="webhook-row">
-				<code class="webhook">{webhookUrl}</code>
-				<button type="button" class="btn small" onclick={copyWebhook}>
-					{copied ? 'Copied ✓' : 'Copy'}
-				</button>
+		{#if data.workflow.triggerType === 'webhook'}
+			<div class="card">
+				<h2>Webhook URL</h2>
+				<div class="webhook-row">
+					<code class="webhook">{webhookUrl}</code>
+					<button type="button" class="btn small" onclick={copyWebhook}>
+						{copied ? 'Copied ✓' : 'Copy'}
+					</button>
+				</div>
+				<p class="muted small">
+					Send a <code>POST</code> with a JSON body, or <code>GET</code> with query params.
+				</p>
 			</div>
-			<p class="muted small">
-				Send a <code>POST</code> with a JSON body, or <code>GET</code> with query params.
-			</p>
-		</div>
+		{:else}
+			<div class="card">
+				<h2>Schedule</h2>
+				<div class="webhook-row">
+					<code class="webhook">{data.workflow.cronExpr ?? '—'}</code>
+				</div>
+				<p class="muted small">
+					Fires automatically on this schedule (UTC). Use Manual trigger to test ad-hoc.
+				</p>
+			</div>
+		{/if}
 
 		<div class="card">
 			<h2>Manual trigger</h2>
@@ -541,8 +554,8 @@
 											<span>heal session</span>
 											<a
 												href={resolve(
-													`/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/w/[workflowId]?${string}`,
-													{ workflowId: data.workflow.id }
+													`/p/[projectId]/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+													{ projectId, workflowId: data.workflow.id }
 												)}><code>{heal.id}</code></a
 											>
 											<span class="badge {heal.status}">{heal.status}</span>
@@ -622,8 +635,8 @@
 											<span>new version</span>
 											<a
 												href={resolve(
-													`/w/[workflowId]?${tabQuery('code', { version: h.newVersionId })}` as `/w/[workflowId]?${string}`,
-													{ workflowId: data.workflow.id }
+													`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: h.newVersionId })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+													{ projectId, workflowId: data.workflow.id }
 												)}><code>{h.newVersionId}</code></a
 											>
 										</div>
@@ -713,8 +726,8 @@
 						onchange={(e) => {
 							const v = (e.currentTarget as HTMLSelectElement).value;
 							window.location.href = resolve(
-								`/w/[workflowId]?${tabQuery('code', { version: v })}` as `/w/[workflowId]?${string}`,
-								{ workflowId: data.workflow.id }
+								`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: v })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+								{ projectId, workflowId: data.workflow.id }
 							);
 						}}
 					>
@@ -738,8 +751,8 @@
 							<span>parent</span>
 							<a
 								href={resolve(
-									`/w/[workflowId]?${tabQuery('code', { version: selectedVersion.parentVersionId })}` as `/w/[workflowId]?${string}`,
-									{ workflowId: data.workflow.id }
+									`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: selectedVersion.parentVersionId })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+									{ projectId, workflowId: data.workflow.id }
 								)}><code>{selectedVersion.parentVersionId}</code></a
 							>
 						</div>

@@ -1,30 +1,33 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+
+	let projectId = $derived(page.params.projectId!);
 
 	function fmt(ts: number): string {
 		return new Date(ts).toLocaleString();
 	}
 
 	function triggerLabel(t: string, cron: string | null): string {
-		if (t === 'webhook') return 'webhook';
 		if (t === 'cron') return cron ? `cron (${cron})` : 'cron';
-		return cron ? `both (${cron})` : 'both';
+		return 'webhook';
 	}
 </script>
 
 <div class="page-head">
 	<h1>Workflows</h1>
-	<a class="btn primary" href={resolve('/new')}>+ New workflow</a>
+	<a class="btn primary" href={resolve('/p/[projectId]/new', { projectId })}>+ New workflow</a>
 </div>
 
 {#if data.workflows.length === 0}
 	<div class="empty">
 		<p>No workflows yet.</p>
 		<p>
-			<a href={resolve('/new')}>Create your first one</a> by describing what it should do in plain English.
+			<a href={resolve('/p/[projectId]/new', { projectId })}>Create your first one</a> by describing what
+			it should do in plain English.
 		</p>
 	</div>
 {:else}
@@ -44,7 +47,12 @@
 			{#each data.workflows as w (w.id)}
 				<tr>
 					<td>
-						<a class="name" href={resolve('/w/[workflowId]', { workflowId: w.id })}>{w.name}</a>
+						<a
+							class="name"
+							href={resolve('/p/[projectId]/w/[workflowId]', { projectId, workflowId: w.id })}
+						>
+							{w.name}
+						</a>
 						<div class="id">{w.id}</div>
 					</td>
 					<td>{triggerLabel(w.triggerType, w.cronExpr)}</td>
@@ -58,7 +66,11 @@
 						{/if}
 					</td>
 					<td class="muted">{fmt(w.createdAt)}</td>
-					<td><a href={resolve('/w/[workflowId]', { workflowId: w.id })}>Open →</a></td>
+					<td>
+						<a href={resolve('/p/[projectId]/w/[workflowId]', { projectId, workflowId: w.id })}>
+							Open →
+						</a>
+					</td>
 				</tr>
 			{/each}
 		</tbody>

@@ -1,22 +1,24 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import type { PageProps } from './$types';
 
 	import { untrack } from 'svelte';
 
 	let { form }: PageProps = $props();
+	let projectId = $derived(page.params.projectId!);
 
 	const initial = untrack(() => form);
 	let name = $state(initial?.values?.name ?? '');
 	let prompt = $state(initial?.values?.prompt ?? '');
-	let trigger = $state<'webhook' | 'cron' | 'both'>(
-		(initial?.values?.trigger as 'webhook' | 'cron' | 'both' | undefined) ?? 'webhook'
+	let trigger = $state<'webhook' | 'cron'>(
+		(initial?.values?.trigger as 'webhook' | 'cron' | undefined) ?? 'webhook'
 	);
 	let cronExpr = $state(initial?.values?.cronExpr ?? '');
 	let submitting = $state(false);
 
-	let needsCron = $derived(trigger === 'cron' || trigger === 'both');
+	let needsCron = $derived(trigger === 'cron');
 </script>
 
 <div class="page-head">
@@ -27,7 +29,7 @@
 			module that runs on every trigger.
 		</p>
 	</div>
-	<a href={resolve('/')} class="back">← Back</a>
+	<a href={resolve('/p/[projectId]', { projectId })} class="back">← Back</a>
 </div>
 
 {#if submitting}
@@ -86,9 +88,6 @@
 			<label class="radio">
 				<input type="radio" name="trigger" value="cron" bind:group={trigger} /> cron
 			</label>
-			<label class="radio">
-				<input type="radio" name="trigger" value="both" bind:group={trigger} /> both
-			</label>
 		</fieldset>
 
 		{#if needsCron}
@@ -106,7 +105,7 @@
 		{/if}
 
 		<div class="actions">
-			<a href={resolve('/')} class="btn">Cancel</a>
+			<a href={resolve('/p/[projectId]', { projectId })} class="btn">Cancel</a>
 			<button class="btn primary" type="submit">Generate workflow</button>
 		</div>
 	</form>

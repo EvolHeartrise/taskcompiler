@@ -1,28 +1,20 @@
-import { error } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listWorkflowsForUser } from '$lib/server/db/queries/workflows';
-import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
-import { listEventsForWorkflow } from '$lib/server/db/queries/events';
+import { ensureDefaultProject } from '$lib/server/db/queries/projects';
+import { PROJECT_COOKIE } from '$lib/server/projects/cookie';
 
-export const load: PageServerLoad = async ({ locals }) => {
-	if (!locals.user) throw error(401, 'unauthorized');
-	const workflows = await listWorkflowsForUser(locals.user.id);
-
-	const enriched = await Promise.all(
-		workflows.map(async (w) => {
-			const [failed, runs, events] = await Promise.all([
-				listFailedRunsForWorkflow(w.id),
-				listRunsForWorkflow(w.id),
-				listEventsForWorkflow(w.id, { limit: 1000 })
-			]);
-			return {
-				...w,
-				failedRuns: failed.length,
-				totalRuns: runs.length,
-				totalEvents: events.length
-			};
-		})
-	);
-
-	return { workflows: enriched };
+// Bare `/` has no project context. Redirect to the last-visited project
+// (from the cookie) or the user's first project. ensureDefaultProject
+// Guarantees at least one project exists.
+export const load: PageServerLoad = async ({ locals, cookies }) => {
+	if (!locals.user) {
+		error(401, 'unauthorized');
+	}
+	const projects = await ensureDefaultProject(locals.user.id);
+	const cookieId = cookies.get(PROJECT_COOKIE);
+	const target = (cookieId ? projects.find((p) => p.id === cookieId) : undefined) ?? projects[0];
+	if (!target) {
+		error(500, 'no project available');
+	}
+	redirect(303, `/p/${target.id}`);
 };
