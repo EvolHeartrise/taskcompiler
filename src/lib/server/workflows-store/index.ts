@@ -21,12 +21,12 @@ export function testScriptName(workflowId: string, nonce: string): string {
 	return `test-${workflowIdSlug(workflowId)}-${nonce}`;
 }
 
-// USER_ID is baked into every workflow script at upload time so the
-// Bootstrap can query `user_secrets WHERE user_id = ?` at runtime.
+// PROJECT_ID is baked into every workflow script at upload time so the
+// Bootstrap can query `project_secrets WHERE project_id = ?` at runtime.
 // Never changes after creation; secret values live in D1 and are loaded
 // Lazily per invocation.
-export function userIdBinding(userId: string): WfpBinding {
-	return { name: 'USER_ID', text: userId, type: 'plain_text' };
+export function projectIdBinding(projectId: string): WfpBinding {
+	return { name: 'PROJECT_ID', text: projectId, type: 'plain_text' };
 }
 
 export async function writeVersion(
@@ -40,7 +40,7 @@ export async function writeVersion(
 	}
 	const scriptName = workflowScriptName(workflowId, version);
 	await uploadWorkflow({
-		bindings: [userIdBinding(workflow.userId)],
+		bindings: [projectIdBinding(workflow.projectId)],
 		scriptName,
 		userSourceTs: sourceTs
 	});
@@ -75,9 +75,9 @@ export async function tearDownWorkflow(workflowId: string): Promise<TearDownResu
 		} catch (error) {
 			scriptsFailed += 1;
 			console.error('[teardown] WFP delete failed', {
-				workflowId,
+				error: error instanceof Error ? error.message : String(error),
 				scriptName: v.deployPath,
-				error: error instanceof Error ? error.message : String(error)
+				workflowId
 			});
 		}
 	}

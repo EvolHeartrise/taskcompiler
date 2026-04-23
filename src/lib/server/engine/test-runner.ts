@@ -1,6 +1,6 @@
 import { getEnv } from '$lib/server/env';
 import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
-import { testScriptName, userIdBinding } from '$lib/server/workflows-store';
+import { projectIdBinding, testScriptName } from '$lib/server/workflows-store';
 import type { Event, RunError, RunLogEntry, Workflow } from '$lib/server/db/types';
 
 export interface EphemeralRunResult {
@@ -68,7 +68,7 @@ export async function runAgainstEventEphemeral(
 	try {
 		try {
 			await uploadWorkflow({
-				bindings: [userIdBinding(workflow.userId)],
+				bindings: [projectIdBinding(workflow.projectId)],
 				scriptName,
 				userSourceTs: sourceTs
 			});

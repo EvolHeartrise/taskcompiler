@@ -1,4 +1,4 @@
-export type TriggerType = 'webhook' | 'cron' | 'both';
+export type TriggerType = 'webhook' | 'cron';
 export type EventTriggerType = 'webhook' | 'cron' | 'manual' | 'replay';
 export type RunStatus = 'running' | 'ok' | 'failed' | 'superseded';
 export type HealStatus =
@@ -19,9 +19,17 @@ export type UnhealableCategory =
 	| 'capability_gap'
 	| 'other';
 
-export interface Workflow {
+export interface Project {
 	id: string;
 	userId: string;
+	name: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export interface Workflow {
+	id: string;
+	projectId: string;
 	name: string;
 	prompt: string;
 	currentVersionId: string | null;
@@ -125,13 +133,13 @@ export interface WorkflowStateEntry {
 	updatedAt: number;
 }
 
-export interface UserSecretMeta {
-	userId: string;
+export interface ProjectSecretMeta {
+	projectId: string;
 	name: string;
 	createdAt: number;
 	updatedAt: number;
 }
 
-export interface UserSecret extends UserSecretMeta {
+export interface ProjectSecret extends ProjectSecretMeta {
 	value: string;
 }

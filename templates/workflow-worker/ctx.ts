@@ -20,7 +20,7 @@ interface D1Database {
 
 export interface WorkflowEnv {
 	DB: D1Database;
-	USER_ID: string;
+	PROJECT_ID: string;
 	[key: string]: unknown;
 }
 
@@ -98,14 +98,14 @@ function headerHas(init: RequestInit | undefined, name: string): boolean {
 }
 
 /**
- * Pull the current user's secrets fresh per invocation. One D1 query per
+ * Pull the project's secrets fresh per invocation. One D1 query per
  * workflow execution; `ctx.secret()` reads from the returned Map.
  * Rotating a secret in the UI takes effect on the very next invocation —
  * no redeploy needed.
  */
 export async function loadSecrets(env: WorkflowEnv): Promise<Map<string, string>> {
-	const res = await env.DB.prepare(`SELECT name, value FROM user_secrets WHERE user_id = ?`)
-		.bind(env.USER_ID)
+	const res = await env.DB.prepare(`SELECT name, value FROM project_secrets WHERE project_id = ?`)
+		.bind(env.PROJECT_ID)
 		.all<D1SecretRow>();
 	const map = new Map<string, string>();
 	for (const row of res.results) {

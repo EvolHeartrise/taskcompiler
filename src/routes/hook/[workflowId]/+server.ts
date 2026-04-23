@@ -62,6 +62,9 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	if (!wf) {
 		return errorJson(404, 'workflow not found');
 	}
+	if (wf.triggerType !== 'webhook') {
+		return errorJson(400, `workflow trigger is '${wf.triggerType}', not 'webhook'`);
+	}
 
 	const parsed = await parseBody(request);
 	if (!parsed.ok) {
@@ -78,7 +81,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 	} catch (error) {
 		const e = error as Error;
 		return json(
-			{ error: { name: e.name ?? 'Error', message: e.message ?? String(error) } },
+			{ error: { message: e.message ?? String(error), name: e.name ?? 'Error' } },
 			{ status: 500 }
 		);
 	}
@@ -93,6 +96,9 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	const wf = await getWorkflow(workflowId);
 	if (!wf) {
 		return errorJson(404, 'workflow not found');
+	}
+	if (wf.triggerType !== 'webhook') {
+		return errorJson(400, `workflow trigger is '${wf.triggerType}', not 'webhook'`);
 	}
 
 	const payload: Record<string, string> = {};
@@ -110,7 +116,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	} catch (error) {
 		const e = error as Error;
 		return json(
-			{ error: { name: e.name ?? 'Error', message: e.message ?? String(error) } },
+			{ error: { message: e.message ?? String(error), name: e.name ?? 'Error' } },
 			{ status: 500 }
 		);
 	}
