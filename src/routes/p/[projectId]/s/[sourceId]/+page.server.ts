@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { deleteEventSource, getEventSourceForProject } from '$lib/server/db/queries/event-sources';
-import { listAllEventsForSource, listEventsForSource } from '$lib/server/db/queries/events';
+import { countEventsForSource, listEventsForSource } from '$lib/server/db/queries/events';
 import { listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import { listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
@@ -14,9 +14,9 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		error(404, 'Event source not found');
 	}
 
-	const [recentEvents, allEvents, workflows] = await Promise.all([
+	const [recentEvents, totalEvents, workflows] = await Promise.all([
 		listEventsForSource(source.id, { limit: 50 }),
-		listAllEventsForSource(source.id),
+		countEventsForSource(source.id),
 		listWorkflowsForEventSource(source.id)
 	]);
 
@@ -41,7 +41,7 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		events: recentEvents,
 		origin: url.origin,
 		stats: {
-			totalEvents: allEvents.length
+			totalEvents
 		},
 		workflows: enrichedWorkflows
 	};
