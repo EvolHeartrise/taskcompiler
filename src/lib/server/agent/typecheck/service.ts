@@ -2,14 +2,9 @@ import ts from 'typescript';
 import { ctxDtsTemplate } from '$lib/server/wfp/templates.generated';
 import { TS_LIB_FILES } from './ts-lib.generated';
 
-// Type-checks an agent-generated workflow source against the project's secret
-// Names. Runs in-process on a warm LanguageService + shared DocumentRegistry:
-// Lib.*.d.ts parses once per isolate, subsequent checks only re-parse the
-// Candidate workflow and (if secrets changed) a tiny synthesized ctx.d.ts.
-//
-// Diagnostics are formatted for agent consumption — one line per issue,
-// `workflow.ts:line:col - error TSxxxx: message` — and fed back through the
-// Same emit-retry channel that the regex validators use.
+// Warm LanguageService + shared DocumentRegistry: lib.*.d.ts parses once
+// per isolate; subsequent checks only re-parse the candidate workflow and
+// (if secrets changed) a tiny synthesized ctx.d.ts.
 
 const LIB_DIR = '/lib/';
 const CTX_FILENAME = '/ctx.d.ts';
@@ -18,10 +13,9 @@ const MAIN_FILENAME = '/main.ts';
 const SECRET_PLACEHOLDER = '/* __RUNELY_SECRET_NAMES__ */ never';
 const MAX_REPORTED_DIAGNOSTICS = 20;
 
-// Pulls the workflow's default export through the same Ctx-typed signature
-// the bootstrap uses at runtime. With this in the program, TS reports a
-// missing default export (TS1192/TS2613) or wrong signature as a normal
-// diagnostic, instead of needing a separate regex pre-check.
+// Forces the workflow's default export through the Ctx-typed signature
+// the bootstrap uses at runtime, so a missing default (TS1192/TS2613) or
+// wrong signature surfaces as a normal diagnostic without a regex pre-check.
 const MAIN_SOURCE = `import workflow from './workflow';
 const _check: (event: unknown, ctx: Ctx) => Promise<unknown> = workflow;
 void _check;
@@ -97,13 +91,9 @@ export interface TypecheckResult {
 	diagnostics: string[];
 }
 
-/**
- * Type-check agent-generated workflow source. `secretNames` is the list of
- * secret names currently defined for the owning project — the `ctx.secret`
- * parameter type is narrowed to a union of these literals (or `never` when
- * the project has no secrets), so `ctx.secret("TYPO")` surfaces as a TS
- * error with the valid names listed in the message.
- */
+// `ctx.secret`'s parameter is narrowed to a union of `secretNames` literals
+// (or `never` when empty), so `ctx.secret("TYPO")` surfaces as a TS error
+// that lists the valid names.
 export function typecheckWorkflow(secretNames: readonly string[], source: string): TypecheckResult {
 	const { service, scripts } = init();
 

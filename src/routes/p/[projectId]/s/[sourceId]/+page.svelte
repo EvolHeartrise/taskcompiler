@@ -53,7 +53,7 @@
 			copied = true;
 			setTimeout(() => (copied = false), 1500);
 		} catch {
-			// ignore
+			/* clipboard API unavailable */
 		}
 	}
 

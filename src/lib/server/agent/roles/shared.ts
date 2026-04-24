@@ -36,11 +36,9 @@ export interface TypecheckedEmitSpec<Payload> {
 	buildPayload(input: { sourceTs: string; summary: string }): Payload;
 }
 
-// Build a terminal emit tool that gates delivery on a TypeScript typecheck
-// of the workflow source. On failure the agent sees the diagnostics and
-// retries until `maxAttempts` is reached; on success the payload is stored
-// on shared state and an EmitSuccess sentinel is thrown for `wrapTerminal`
-// to turn into an abort + confirmation message.
+// On failure the agent sees the diagnostics and retries until `maxAttempts`;
+// on success the payload is stored on shared state and an EmitSuccess sentinel
+// is thrown for `wrapTerminal` to turn into an abort + confirmation message.
 export function makeTypecheckedEmitTool<Payload>(spec: TypecheckedEmitSpec<Payload>): Tool {
 	return defineTool<{ source_ts: string; summary: string }>({
 		name: spec.name,

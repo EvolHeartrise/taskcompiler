@@ -8,9 +8,6 @@ function safeStringify(v: unknown): string {
 	}
 }
 
-// Convert an arbitrary thrown value into a RunError, preserving name, message,
-// and stack when available. Used by the test-runner (returning the raw
-// workflow failure) and anywhere else that needs a faithful error conversion.
 export function toRunError(err: unknown): RunError {
 	if (err instanceof Error) {
 		const out: RunError = {
@@ -36,9 +33,6 @@ export function toRunError(err: unknown): RunError {
 	return { message: safeStringify(err), name: 'NonError' };
 }
 
-// Tag a failure as infra-category (retryable, not a user-code bug). The name
-// indicates the failure stage (e.g., DispatchNetworkError, InvalidDispatchBody)
-// rather than the original error's name.
 export function classifyInfraFailure(name: string, message: string): RunError {
 	return { category: 'infra', message, name };
 }

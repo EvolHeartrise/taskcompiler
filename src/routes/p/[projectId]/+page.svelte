@@ -16,8 +16,6 @@
 		return 'webhook';
 	}
 
-	// Group workflows by their event source so each source card can list
-	// everything attached to it.
 	let workflowsBySource = $derived(
 		data.workflows.reduce<Record<string, typeof data.workflows>>((acc, w) => {
 			(acc[w.eventSourceId] ??= []).push(w);

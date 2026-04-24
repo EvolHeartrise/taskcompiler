@@ -37,10 +37,8 @@ async function parseBody(
 	}
 }
 
-// Fanout response summarizes the event capture and every workflow dispatch.
-// Each workflow that ran gets its runId + status; workflows still generating
-// Are reported as skipped so the caller knows the event was captured but
-// Not delivered there yet.
+// Workflows still generating are reported as skipped so the caller knows
+// the event was captured but not delivered to that workflow yet.
 function fanoutResponse(res: ExecuteSourceEventResult): Response {
 	return json(
 		{

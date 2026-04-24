@@ -1,17 +1,6 @@
 #!/usr/bin/env bun
-// Synthetic webhook driver. Posts a series of payload variants to a Runely
-// Webhook URL so we can exercise the full ingest → shape-infer → regenerate-
-// Type → trigger-generation → execute pipeline end-to-end.
-//
-// Usage:
-//   Bun run scripts/synthetic-webhook.ts <webhook-url>
-//   Bun run scripts/synthetic-webhook.ts <webhook-url> --shape pull_request_opened
-//   Bun run scripts/synthetic-webhook.ts <webhook-url> --all
-//   Bun run scripts/synthetic-webhook.ts <webhook-url> --all --delay 2000
-//
-// Defaults to sending one shape (the github push event) so the first call
-// Triggers generation. With --all, walks through every shape so you can
-// See the union grow.
+// Run with `--help` for usage; posts sample webhook payloads to a Runely
+// webhook URL to exercise the ingest → execute pipeline end-to-end.
 
 interface SyntheticShape {
 	name: string;
@@ -158,7 +147,7 @@ async function send(url: string, shape: SyntheticShape): Promise<SendResult> {
 	try {
 		body = JSON.parse(text);
 	} catch {
-		// Non-JSON, keep raw
+		/* non-JSON, keep raw text */
 	}
 	return { body, httpStatus: res.status, shape: shape.name };
 }

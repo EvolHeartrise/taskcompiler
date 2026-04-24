@@ -1,5 +1,4 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
-// For information about these interfaces
 import type {
 	CfProperties,
 	D1Database,
@@ -13,13 +12,10 @@ import type { HealWorkflowParams } from '$lib/server/workflows/heal-flow';
 
 declare global {
 	namespace App {
-		// Interface Error {}
 		interface Locals {
 			user: { id: string; email: string; name: string; image: string | null } | null;
 			session: { id: string; token: string; expiresAt: Date; userId: string } | null;
 		}
-		// Interface PageData {}
-		// Interface PageState {}
 		interface Platform {
 			env: Env;
 			cf: CfProperties;

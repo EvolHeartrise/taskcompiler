@@ -2,7 +2,6 @@ import { redirect, type Handle } from '@sveltejs/kit';
 import { withEnv } from '$lib/server/env';
 import { auth } from '$lib/server/auth';
 
-// Routes that stay accessible without a session. Everything else requires auth.
 function isPublic(pathname: string): boolean {
 	if (pathname === '/auth' || pathname.startsWith('/auth/')) {
 		return true;
@@ -11,11 +10,11 @@ function isPublic(pathname: string): boolean {
 		return true;
 	}
 	if (pathname.startsWith('/hook/')) {
-		return true;
-	} // webhook endpoints are external
+		return true; // webhook endpoints are external
+	}
 	if (pathname === '/api/dev/cron-tick') {
-		return true;
-	} // dev-only trigger
+		return true; // dev-only trigger
+	}
 	return false;
 }
 

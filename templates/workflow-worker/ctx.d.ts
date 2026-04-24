@@ -1,12 +1,7 @@
-// Agent-visible workflow execution context. This file is type-checked against
-// The generated workflow module before deploy; the `secret` parameter type is
-// Substituted per project with a string-literal union of that project's actual
-// Secret names (or `never` when the project has no secrets yet), so a typo in
-// `ctx.secret("…")` becomes a TS error that the agent must fix.
-//
-// Kept in sync with the runtime ctx surface in templates/workflow-worker/ctx.ts.
-// The `__RUNELY_SECRET_NAMES__` marker is the ONLY hook the typecheck service
-// Rewrites — do not remove it.
+// Kept in sync with the runtime ctx surface in ctx.ts. The typecheck service
+// rewrites the `__RUNELY_SECRET_NAMES__` marker below with a per-project
+// string-literal union (or `never`) so `ctx.secret("TYPO")` becomes a TS
+// error — DO NOT remove the marker.
 
 interface Ctx {
 	workflow: { id: string; name: string };

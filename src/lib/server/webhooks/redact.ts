@@ -1,16 +1,5 @@
-// Header redaction for inbound webhooks. Run on every event before persistence.
-//
-// Strategy (denylist + name-regex + size caps + CF-noise strip):
-//   1. Lowercase all header names.
-//   2. Drop Cloudflare- and proxy-injected headers entirely (noise + IP leakage).
-//   3. For survivors, redact the value to "<redacted>" if the name is a known
-//      Auth/signature header — but keep the key so workflow code can branch on
-//      Its presence. Specifically targets GitHub `x-hub-signature*`, GitLab
-//      `x-gitlab-token`, Stripe `stripe-signature`, Cloudflare `cf-webhook-auth`,
-//      Plus any header whose name matches /(signature|hmac|secret|token|auth|
-//      Api[-_]?key|webhook[-_]?secret)/i.
-//   4. Truncate any single value over 8 KiB.
-//   5. Cap to 100 headers and 64 KiB total; stop adding once either trips.
+// For sensitive headers the value is redacted but the key is retained, so
+// workflow code can still branch on the header's presence.
 
 const NAME_DENYLIST = new Set([
 	'authorization',

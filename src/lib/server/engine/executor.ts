@@ -74,8 +74,6 @@ function sleep(ms: number): Promise<void> {
 
 type AttemptResult<T> = { done: true; value: T } | { done: false; reason: string; value?: T };
 
-// Generic exponential backoff (3^i). `attempt` returns done:true to stop or
-// done:false to retry. After maxAttempts, returns the last attempt's result.
 async function retryWithBackoff<T>(
 	label: string,
 	maxAttempts: number,
@@ -120,10 +118,8 @@ async function dispatchWithRetry(args: {
 	return result.done ? result.value : result.value!;
 }
 
-// Capture an event on an event source and fan out to every workflow attached
-// To the source. Each workflow that has a current version gets its own run;
-// Workflows still generating (no currentVersionId) are skipped — the event
-// Is persisted and can be replayed (or backfilled) once they come online.
+// Workflows without a current version are skipped, but the event is still
+// persisted so it can be replayed or backfilled once they come online.
 export async function executeSourceEvent(
 	opts: ExecuteSourceEventOptions
 ): Promise<ExecuteSourceEventResult> {
@@ -176,8 +172,6 @@ export async function executeSourceEvent(
 	};
 }
 
-// Manual trigger from a workflow page — creates a manual event under the
-// Workflow's event source and dispatches to that single workflow only.
 export async function executeManualEvent(opts: ExecuteManualOptions): Promise<ExecuteResult> {
 	const workflow = await getWorkflow(opts.workflowId);
 	if (!workflow) {
@@ -248,9 +242,8 @@ export async function executeExistingEventForWorkflow(
 			};
 		}
 
-		// Both user_error and infra_error are persisted as failed runs. The
-		// Error.category on the row distinguishes them; only user_code
-		// Failures spawn a heal below.
+		// Both user_error and infra_error persist as failed runs (distinguished
+		// by error.category); only user_error spawns a heal below.
 		const runError = outcome.error;
 		const runLogs = outcome.kind === 'user_error' ? outcome.logs : [];
 		await finishRunFailed(run.id, runError, runLogs);
@@ -267,8 +260,6 @@ export async function executeExistingEventForWorkflow(
 			};
 		}
 
-		// User-code failure. Suppress heal if the workflow already has an
-		// Unresolved needs_attention session, or a running heal session.
 		const needsAttention = await getOpenNeedsAttentionSession(workflow.id);
 		if (needsAttention) {
 			console.log(

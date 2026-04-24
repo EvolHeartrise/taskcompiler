@@ -8,12 +8,6 @@ export interface GenWorkflowParams {
 	workflowId: string;
 	name: string;
 	prompt: string;
-	/**
-	 * If true, after generation succeeds, run the new workflow against every
-	 * historical event on its event source as is_replay runs. Useful for
-	 * graceful-handover / A/B scenarios where a new workflow is attached to a
-	 * source with existing events.
-	 */
 	backfill?: boolean;
 }
 
@@ -54,9 +48,9 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 			return genResult;
 		}
 
-		// Backfill is best-effort — individual run failures are captured in the
-		// DispatchTally and do not abort the workflow. We also tolerate the
-		// Entire backfill throwing: the workflow is deployed either way.
+		// Best-effort: individual run failures are captured in the DispatchTally,
+		// and the entire backfill throwing is tolerated — the workflow is
+		// deployed either way.
 		const backfill = await step.do(
 			'backfill',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },

@@ -59,7 +59,7 @@
 			copied = true;
 			setTimeout(() => (copied = false), 1500);
 		} catch {
-			// ignore
+			/* clipboard API unavailable */
 		}
 	}
 
@@ -97,7 +97,6 @@
 		return 'webhook';
 	}
 
-	// Expand state for rows
 	let expandedEvents = $state<Record<string, boolean>>({});
 	let expandedRuns = $state<Record<string, boolean>>({});
 	let expandedFailures = $state<Record<string, boolean>>({});
@@ -108,7 +107,6 @@
 		map[id] = !map[id];
 	}
 
-	// Selected version for the Code tab
 	let selectedVersionId = $derived(
 		page.url.searchParams.get('version') ?? data.currentVersion?.id ?? ''
 	);
@@ -148,8 +146,8 @@
 		deleteDialog?.close();
 	}
 
-	// If the server action returns an error, the dialog was already closed by
-	// SvelteKit's default form behavior. Re-open it so the user sees the error.
+	// SvelteKit's default form handling closes the dialog even on error; re-open
+	// it so the user sees the error message.
 	$effect(() => {
 		if (deleteResult && 'error' in deleteResult) {
 			deleteDialog?.showModal();

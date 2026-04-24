@@ -73,8 +73,8 @@ export interface ListEventsOptions {
 	since?: number;
 }
 
-// SQLite treats a negative LIMIT as unbounded, letting us express "no limit"
-// In a single parameterised query instead of branching the statement.
+// SQLite treats a negative LIMIT as unbounded, so "no limit" is a single
+// parameterised query instead of a branched statement.
 export async function listEventsForSource(
 	sourceId: string,
 	opts: ListEventsOptions = {}
@@ -88,8 +88,6 @@ export async function listEventsForSource(
 	return res.results.map(rowToEvent);
 }
 
-// Convenience: list events for a workflow by joining on its event_source_id.
-// Used by the UI and agent tools so callers don't need to do the join.
 export async function listEventsForWorkflow(
 	workflowId: string,
 	opts: ListEventsOptions = {}
@@ -127,8 +125,7 @@ export async function countEventsForSource(sourceId: string): Promise<number> {
 	return row?.count ?? 0;
 }
 
-// Batched event counts for a project — one query instead of N per-source
-// Counts from the home loader.
+// One query instead of N per-source counts.
 export async function countEventsBySourceForProject(
 	projectId: string
 ): Promise<Map<string, number>> {

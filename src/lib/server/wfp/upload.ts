@@ -8,10 +8,9 @@ import {
 	DISPATCH_NAMESPACE
 } from './config';
 
-// The bootstrap source strings are pre-inlined into a generated TS module
-// (see scripts/generate-templates.ts). We avoid Vite's `?raw` suffix here so
-// Wrangler's esbuild — which doesn't understand `?raw` — can also bundle this
-// File when it bundles `src/worker.ts` for deployment.
+// Pre-inlined into a generated TS module (see scripts/generate-templates.ts).
+// Avoiding Vite's `?raw` suffix here lets Wrangler's esbuild — which doesn't
+// understand `?raw` — bundle this file with `src/worker.ts` for deployment.
 import {
 	bootstrapCtxSource,
 	bootstrapErrorSource,
@@ -142,7 +141,7 @@ export async function deleteWorkflow(scriptName: string): Promise<void> {
 		try {
 			parsed = JSON.parse(text) as CloudflareApiError;
 		} catch {
-			// Fall through to raw text
+			/* fall through to raw text */
 		}
 	}
 	const detail = parsed?.errors?.length

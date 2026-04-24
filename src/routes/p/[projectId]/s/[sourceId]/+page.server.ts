@@ -7,8 +7,8 @@ import { listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { errorMessage } from '$lib/server/util';
 
-// Project ownership is enforced by /p/[projectId]/+layout.server.ts; we scope
-// The event-source lookup by project so /p/A/s/[id-of-B-source] 404s.
+// Layout enforces project ownership; the event-source lookup is still scoped
+// by project so /p/A/s/[id-of-B-source] 404s rather than leaking.
 export const load: PageServerLoad = async ({ params, url }) => {
 	const source = await getEventSourceForProject(params.sourceId, params.projectId);
 	if (!source) {
@@ -65,8 +65,6 @@ export const actions: Actions = {
 			});
 		}
 
-		// Tear down every workflow attached, then drop the event_source row.
-		// WFP script deletes are best-effort; DB cascade wipes events + runs.
 		try {
 			const workflows = await listWorkflowsForEventSource(source.id);
 			for (const w of workflows) {

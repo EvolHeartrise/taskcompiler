@@ -65,9 +65,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 
 	const ctx: ToolCtx = {
 		abortSignal: opts.abortSignal,
-		log: () => {
-			// no-op by default; callers wire logging via onEvent
-		}
+		log: () => {}
 	};
 
 	const messages: AgentMessage[] = [{ role: 'user', content: opts.userMessage }];

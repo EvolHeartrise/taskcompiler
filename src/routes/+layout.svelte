@@ -14,9 +14,9 @@
 		await goto(resolve('/auth'));
 	}
 
-	// URL is the source of truth for the active project. These read-only
-	// derivations come straight from page.params / page.data so the sidebar
-	// always reflects the URL — across tabs, in browser history, etc.
+	// URL is the source of truth for the active project; these derivations
+	// come from page.params / page.data so the sidebar always reflects the
+	// URL across tabs and history.
 	let activeProjectId = $derived<string | null>(page.params.projectId ?? null);
 	let projectSources = $derived<
 		Array<{ id: string; name: string; triggerType: string; cronExpr: string | null }>
@@ -56,9 +56,8 @@
 	async function onProjectChange(e: Event) {
 		const next = (e.currentTarget as HTMLSelectElement).value;
 		if (!next || next === activeProjectId) return;
-		// Switch to the project's home. We could try to preserve the current
-		// sub-page (e.g. /secrets), but workflow ids are project-scoped so
-		// /w/[id] would 404 anyway. Project root is always safe.
+		// Always navigate to project root — workflow ids are project-scoped,
+		// so preserving a sub-page like /w/[id] would 404 after switching.
 		await goto(resolve('/p/[projectId]', { projectId: next }));
 	}
 </script>

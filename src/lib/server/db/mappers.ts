@@ -1,24 +1,15 @@
-// Run a single-row D1 query and map the result to its camelCase domain
-// shape, or null if no row matched. Saves the boilerplate `row ? mapRow(row) : null`
-// at every single-row lookup site.
 export async function fetchOne<R extends object, D>(stmt: D1PreparedStatement): Promise<D | null> {
 	const row = await stmt.first<R>();
 	return row ? mapRow<D>(row) : null;
 }
 
-// Run a multi-row D1 query and map each result to its camelCase domain
-// shape. Saves the boilerplate `res.results.map((r) => mapRow(r))` at every
-// list lookup site.
 export async function fetchAll<R extends object, D>(stmt: D1PreparedStatement): Promise<D[]> {
 	const res = await stmt.all<R>();
 	return res.results.map((r) => mapRow<D>(r));
 }
 
-// Build a complete D from a row plus hand-layered fields. Maps the row to
-// its camelCase shape (skipping any source columns the caller is about to
-// layer on top), then merges the layered fields. Use this when domain
-// fields need a transform mapRow can't do — JSON parsing, boolean coercion,
-// camel-renames that don't follow snake_case rules.
+// Use when domain fields need a transform mapRow can't do — JSON parsing,
+// boolean coercion, or camel-renames that don't follow snake_case rules.
 export function rowToDomain<R extends object, D>(
 	row: R,
 	skipCols: readonly string[],
@@ -27,10 +18,6 @@ export function rowToDomain<R extends object, D>(
 	return { ...mapRow<Partial<D>>(row, skipCols), ...layers } as D;
 }
 
-// Convert a snake_case row from D1 to its camelCase domain shape. Pass
-// `skip` to exclude columns the caller will layer on top (JSON-decoded or
-// boolean-coerced fields); the returned object is cast to the caller's
-// Omit<T, ...> type.
 export function mapRow<T>(row: object, skip: readonly string[] = []): T {
 	const skipSet = new Set(skip);
 	const out: Record<string, unknown> = {};

@@ -6,9 +6,9 @@ import { listWorkflowsForProject } from '$lib/server/db/queries/workflows';
 import { setProjectCookie } from '$lib/server/projects/cookie';
 
 // Single point of project-ownership enforcement for everything under
-// /p/[projectId]/. Children can trust that `params.projectId` belongs to the
-// Signed-in user. Also refreshes the "last visited" cookie so `/` knows
-// Where to redirect on the next bare visit.
+// /p/[projectId]/. Children can trust `params.projectId` belongs to the
+// signed-in user. Also refreshes the "last visited" cookie so `/` knows
+// where to redirect on the next bare visit.
 export const load: LayoutServerLoad = async ({ locals, params, cookies, url }) => {
 	if (!locals.user) {
 		error(401, 'unauthorized');

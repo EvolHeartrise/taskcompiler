@@ -1,10 +1,6 @@
-// Inbound webhook ingestion: redact headers + hand off to the executor for
-// Fanout. Headers are redacted at this boundary (auth/signature stripped, CF
-// Noise dropped) before they ever touch D1 or reach user workflow code.
-//
-// The bootstrap worker constructs the user-visible `{ body, headers }` event
-// From `event.payload` + `event.headers`, so here we persist those two as
-// Separate fields and do NOT pre-wrap them.
+// Headers are redacted here so secrets never reach D1 or user workflow code.
+// Payload + headers are persisted as separate fields (not pre-wrapped): the
+// bootstrap worker reconstructs the `{ body, headers }` event at runtime.
 
 import { type ExecuteSourceEventResult, executeSourceEvent } from '$lib/server/engine';
 import { redactHeaders } from './redact';

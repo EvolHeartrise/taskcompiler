@@ -9,9 +9,6 @@ import { createWorkflow } from '$lib/server/db/queries/workflows';
 import { getEnv } from '$lib/server/env';
 import { errorMessage } from '$lib/server/util';
 
-// Workflow creation form. Requires an event source — either picked via
-// `?source=<id>` (from the source detail page / project home) or selected
-// From the list below.
 export const load: PageServerLoad = async ({ params, url }) => {
 	const sources = await listEventSourcesForProject(params.projectId);
 
@@ -24,8 +21,8 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		}
 	}
 
-	// Show event counts so the "backfill" checkbox makes sense — no events =
-	// Nothing to backfill against.
+	// Event counts feed the "backfill" checkbox UI — no events means there's
+	// nothing to backfill against.
 	const sourcesWithCount = await Promise.all(
 		sources.map(async (s) => ({
 			cronExpr: s.cronExpr,
