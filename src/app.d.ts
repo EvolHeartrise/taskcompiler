@@ -7,14 +7,17 @@ import type {
 	SendEmail,
 	Workflow
 } from '@cloudflare/workers-types';
+import type { auth } from '$lib/server/auth';
 import type { GenWorkflowParams } from '$lib/server/workflows/gen-flow';
 import type { HealWorkflowParams } from '$lib/server/workflows/heal-flow';
+
+type AuthSession = NonNullable<Awaited<ReturnType<ReturnType<typeof auth>['api']['getSession']>>>;
 
 declare global {
 	namespace App {
 		interface Locals {
-			user: { id: string; email: string; name: string; image: string | null } | null;
-			session: { id: string; token: string; expiresAt: Date; userId: string } | null;
+			user: AuthSession['user'] | null;
+			session: AuthSession['session'] | null;
 		}
 		interface Platform {
 			env: Env;
