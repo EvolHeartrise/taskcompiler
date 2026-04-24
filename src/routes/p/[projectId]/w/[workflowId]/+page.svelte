@@ -329,6 +329,14 @@
 			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
 		</div>
 	{/if}
+	{#if data.workflow.prompt}
+		<section class="prompt-section">
+			<div class="card prompt-card">
+				<h2>Original prompt</h2>
+				<pre class="prompt-text">{data.workflow.prompt}</pre>
+			</div>
+		</section>
+	{/if}
 	<section class="grid">
 		<div class="card stats">
 			<div class="stat">
@@ -908,6 +916,26 @@
 		display: grid;
 		grid-template-columns: 1fr 1fr;
 		gap: 16px;
+	}
+	.prompt-section {
+		margin-bottom: 16px;
+	}
+	.prompt-text {
+		margin: 0;
+		padding: 10px 12px;
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		border-radius: 6px;
+		font-family:
+			ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+			monospace;
+		font-size: 13px;
+		line-height: 1.5;
+		color: #111;
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 320px;
+		overflow-y: auto;
 	}
 	.danger-zone {
 		margin-top: 24px;
