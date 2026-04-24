@@ -24,6 +24,7 @@ export interface AgentRunOptions {
 	userMessage: string;
 	tools: Tool[];
 	maxTurns?: number;
+	maxTokens?: number;
 	onEvent?: (e: AgentEvent) => void;
 	abortSignal?: AbortSignal;
 }
@@ -50,6 +51,7 @@ function extractText(content: ContentBlock[]): string {
 export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 	const model = opts.model ?? DEFAULT_MODEL;
 	const maxTurns = opts.maxTurns ?? 40;
+	const maxTokens = opts.maxTokens ?? DEFAULT_MAX_TOKENS;
 	const transcript: AgentEvent[] = [];
 
 	const emit = (e: AgentEvent) => {
@@ -89,7 +91,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 				opts.env,
 				{
 					model,
-					max_tokens: DEFAULT_MAX_TOKENS,
+					max_tokens: maxTokens,
 					system: opts.systemPrompt,
 					messages,
 					tools: toolDefs

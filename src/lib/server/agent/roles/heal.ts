@@ -19,7 +19,13 @@ export interface HealOptions {
 	model?: string;
 	onEvent?: (e: AgentEvent) => void;
 	maxTurns?: number;
+	maxTokens?: number;
 }
+
+// Heal runs include the full candidate source in each emit_fixed_workflow
+// call, so 4k tokens trips out on non-trivial workflows. Bumped only for
+// heal — gen-flow generates from a blank slate and doesn't need the budget.
+const HEAL_MAX_TOKENS = 8192;
 
 export interface HealTestDetail {
 	eventId: string;
@@ -453,6 +459,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		result = await runAgent({
 			abortSignal: controller.signal,
 			env: opts.env,
+			maxTokens: opts.maxTokens ?? HEAL_MAX_TOKENS,
 			maxTurns: opts.maxTurns ?? 50,
 			model: opts.model ?? DEFAULT_MODEL,
 			onEvent: opts.onEvent,
