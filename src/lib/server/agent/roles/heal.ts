@@ -66,13 +66,10 @@ interface EmittedUnhealablePayload {
 
 type EmittedPayload = EmittedFixPayload | EmittedUnhealablePayload;
 
-const UNHEALABLE_CATEGORIES: readonly UnhealableCategory[] = [
-	'third_party_outage',
-	'credential',
-	'input_malformed',
-	'capability_gap',
-	'other'
-];
+// Agent-facing terminal-failure tool no longer asks the agent to classify.
+// Downstream (UI, DB) still reads `unhealableCategory`; we default to 'other'
+// and let `unhealableReason` carry the actual evidence.
+const CANNOT_FIX_CATEGORY: UnhealableCategory = 'other';
 
 export const HEAL_SYSTEM_PROMPT = `You are Runely's workflow healer. A user workflow just failed — your job is to diagnose the failure and either produce a corrected version or declare that no code change can fix it.
 
@@ -92,7 +89,7 @@ No imports from node_modules, no relative imports. \`event\` is \`{ body, header
 - list_failed_runs / get_run: inspect recent failures
 - run_test_event: run a candidate source against a specific historical event in isolation (deploys and tears down a temp Worker per call). Each call costs a few seconds of upload latency, so don't burn budget testing trivial things — use it to validate your final candidate against the failing event and a couple of historical ones.
 - emit_fixed_workflow: terminal. Call when a code change fixes the failure.
-- emit_unhealable: terminal. Call when the failure is NOT fixable by changing workflow code (see below).
+- emit_cannot_fix: terminal. Call when the failure is NOT fixable by changing workflow code (upstream outage, missing/expired secret, structurally alien input, or a capability gap in the ctx surface). The tool description has the full criteria.
 
 ## Principles
 - Diagnose first. Read the error + stack + logs and inspect the failing event payload against the source. Form a hypothesis before editing.
@@ -101,22 +98,8 @@ No imports from node_modules, no relative imports. \`event\` is \`{ body, header
 - After your fix, run_test_event on the failing event AND at least two historical events to confirm no regressions.
 - Keep the run fail-fast semantics — don't swallow exceptions.
 
-## When to emit_unhealable instead of fixing
-Strongly prefer fixing. Only escalate when you are confident no code change will resolve the failure. Before calling emit_unhealable you MUST have:
-  1. Read the source and the triggering error.
-  2. Formed a concrete hypothesis about WHY no code change would work.
-  3. Included the evidence in \`reason\` (specific error text, response body, or observed behavior that demonstrates the cause is external).
-
-Use one of these categories:
-- \`third_party_outage\`: an upstream API the workflow depends on is down, 5xx-ing, or returning errors indicating their side is broken. Don't use this just because a fetch failed once — the code should usually be taught to retry. Use it when the pattern clearly shows the third party, not the code.
-- \`credential\`: the workflow is using a secret (via ctx.secret) that is missing, expired, or unauthorized (401/403 from the upstream with a clear message). The user must rotate or provide the secret.
-- \`input_malformed\`: incoming events are structurally unlike anything the workflow was built to handle, and changing the workflow would change its intent. The user must fix the producer or reframe the prompt.
-- \`capability_gap\`: the workflow is being asked to do something that can't be done through the Runely ctx surface (no filesystem, no spawn, no specific binding). The user must change their goal.
-- \`other\`: none of the above, but clearly not code-fixable. Use sparingly; include a thorough reason.
-
-If you're not sure, attempt a fix first. A wrong fix is usually cheaper than a wrong escalation — the user sees an escalation as "something is blocking my workflow" and acts on it.
-
-Do not emit partial or placeholder code. Call exactly ONE terminal tool (emit_fixed_workflow or emit_unhealable).
+## Convergence
+Call exactly ONE terminal tool: \`emit_fixed_workflow\` on success, or \`emit_cannot_fix\` if the failure is not code-fixable. Strongly prefer fixing — a wrong escalation costs the user more than a wrong fix. If you're not sure, attempt a fix. Do not emit partial or placeholder code.
 
 ## Typecheck gate on emit_fixed_workflow
 The source you emit is type-checked against the Ctx interface. \`ctx.secret\` accepts only the project's current secret names (listed in the user message); a typo or unknown name is a TS error. If emit_fixed_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_fixed_workflow again.`;
@@ -155,7 +138,7 @@ function buildUserMessage(args: {
 	parts.push('## Available secrets (via ctx.secret)');
 	parts.push(
 		args.availableSecrets.length === 0
-			? '(none — if the failure is because a needed secret is missing, use emit_unhealable with category=credential)'
+			? '(none — if the failure is because a needed secret is missing, use emit_cannot_fix and describe which secret is missing in the reason)'
 			: args.availableSecrets.map((n) => `- ${n}`).join('\n')
 	);
 	parts.push('');
@@ -351,29 +334,28 @@ function makeRunTestEventTool(env: Env, workflowId: string): Tool {
 	});
 }
 
-function makeEmitUnhealableTool(state: { emitted: EmittedPayload | null }): Tool {
-	return defineTool<{ category: UnhealableCategory; reason: string }>({
-		name: 'emit_unhealable',
+function makeEmitCannotFixTool(state: { emitted: EmittedPayload | null }): Tool {
+	return defineTool<{ reason: string }>({
+		name: 'emit_cannot_fix',
 		description:
-			"Declare the failure is not fixable by changing workflow code. Call this EXACTLY ONCE with a category and an evidence-backed reason. Only use after you've read the source and formed a concrete hypothesis about why no code change would help.",
+			"Declare the failure is NOT fixable by changing workflow code. Call EXACTLY ONCE with an evidence-backed reason. Only use after diagnosing the triggering error and forming a concrete hypothesis about why no code change would help. Typical situations: (a) upstream API the workflow depends on is down or 5xx-ing — but only if a single fetch failure isn't a retry candidate; (b) a required secret (via ctx.secret) is missing, expired, or returns 401/403 with a clear auth-rejected message; (c) the incoming event is structurally unlike anything the workflow was built for and reshaping the workflow would change its intent; (d) the workflow is asked to do something the ctx surface can't support (no filesystem, no spawn, no specific binding). Prefer fixing if there's any doubt. `reason` must cite the specific error text, response body, or observed behaviour proving the cause is external.",
 		fields: {
-			category: {
-				kind: 'enum',
-				description: 'third_party_outage | credential | input_malformed | capability_gap | other',
-				values: UNHEALABLE_CATEGORIES
-			},
 			reason: {
 				kind: 'string',
 				description:
-					'Evidence-backed explanation: specific error text, observed behavior, or response body that demonstrates the cause is external to the workflow code. 1–3 sentences.'
+					'Evidence-backed explanation: specific error text, observed behaviour, or response body that demonstrates the cause is external to the workflow code. 1–3 sentences.'
 			}
 		},
-		required: ['category', 'reason'],
-		async run({ category, reason }): Promise<string> {
+		required: ['reason'],
+		async run({ reason }): Promise<string> {
 			if (reason.trim().length === 0) {
-				throw new Error('emit_unhealable: `reason` must be a non-empty string');
+				throw new Error('emit_cannot_fix: `reason` must be a non-empty string');
 			}
-			state.emitted = { category, kind: 'unhealable', reason: reason.trim() };
+			state.emitted = {
+				category: CANNOT_FIX_CATEGORY,
+				kind: 'unhealable',
+				reason: reason.trim()
+			};
 			throw new EmitSuccess(state.emitted);
 		}
 	});
@@ -383,7 +365,7 @@ function formatTerminal(payload: EmittedPayload): string {
 	if (payload.kind === 'fixed') {
 		return `ok: fix received (${payload.summary})`;
 	}
-	return `ok: escalated as unhealable (${payload.category})`;
+	return `ok: escalated as cannot_fix`;
 }
 
 export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
@@ -451,7 +433,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 			controller,
 			formatTerminal
 		),
-		wrapTerminal<EmittedPayload>(makeEmitUnhealableTool(emitState), controller, formatTerminal)
+		wrapTerminal<EmittedPayload>(makeEmitCannotFixTool(emitState), controller, formatTerminal)
 	];
 
 	let result: AgentRunResult;
