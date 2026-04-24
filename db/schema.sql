@@ -62,6 +62,9 @@ CREATE INDEX idx_verification_identifier ON verification(identifier);
 
 -- Runely --------------------------------------------------------------------
 
+-- `user_id` is the creator's id and stays as attribution. Access checks go
+-- through `project_members` (flat power model — every member is equal-power;
+-- `role` is forward-compat for differentiated permissions).
 CREATE TABLE projects (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
@@ -70,6 +73,28 @@ CREATE TABLE projects (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX idx_projects_user ON projects(user_id, created_at);
+
+CREATE TABLE project_members (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
+  role TEXT NOT NULL CHECK(role IN ('owner','member')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (project_id, user_id)
+);
+CREATE INDEX idx_project_members_user ON project_members(user_id, created_at);
+
+CREATE TABLE project_invites (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  invited_by TEXT NOT NULL REFERENCES user(id),
+  status TEXT NOT NULL CHECK(status IN ('pending','accepted','revoked','expired')),
+  expires_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_project_invites_email ON project_invites(email, project_id);
+CREATE INDEX idx_project_invites_token ON project_invites(token);
 
 -- Event sources are the base trigger definition — a webhook URL or cron
 -- schedule. Events are persisted per source (not per workflow) and fanned out
