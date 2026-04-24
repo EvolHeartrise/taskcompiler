@@ -27,6 +27,11 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 		event: WorkflowEvent<GenWorkflowParams>,
 		step: WorkflowStep
 	): Promise<GenWorkflowResult> {
+		// See heal-flow.ts for the rationale on this synchronous binding
+		// touch — it prevents second-and-later step.do callbacks from
+		// hanging on env.DISPATCHER materialization.
+		void this.env.DISPATCHER;
+
 		return withLogContext(
 			{
 				context: 'gen-flow',
