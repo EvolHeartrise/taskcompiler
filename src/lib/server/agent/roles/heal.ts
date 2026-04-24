@@ -1,5 +1,6 @@
 import { type AgentEvent, type AgentRunResult, DEFAULT_MODEL, runAgent } from '../loop.ts';
 import type { Tool } from '../tools.ts';
+import { defineTool } from '../tool-schema.ts';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/events';
@@ -140,16 +141,6 @@ function prettyJson(value: unknown, max = 4000): string {
 	return truncate(str, max);
 }
 
-function getStringProp(obj: Record<string, unknown>, key: string): string | null {
-	const v = obj[key];
-	return typeof v === 'string' ? v : null;
-}
-
-function getNumberProp(obj: Record<string, unknown>, key: string): number | null {
-	const v = obj[key];
-	return typeof v === 'number' && Number.isFinite(v) ? v : null;
-}
-
 function buildUserMessage(args: {
 	workflowName: string;
 	workflowId: string;
@@ -219,38 +210,29 @@ function buildUserMessage(args: {
 }
 
 function makeReadSourceTool(sourceTs: string): Tool {
-	return {
-		description: 'Read the current workflow TypeScript source. Returns the full module text.',
-		inputSchema: {
-			additionalProperties: false,
-			properties: {},
-			type: 'object'
-		},
+	return defineTool({
 		name: 'read_source',
+		description: 'Read the current workflow TypeScript source. Returns the full module text.',
+		fields: {},
 		async run(): Promise<string> {
 			return sourceTs;
 		}
-	};
+	});
 }
 
 function makeListEventsTool(workflowId: string): Tool {
-	return {
+	return defineTool<{ limit: number }>({
+		name: 'list_events',
 		description:
 			'List historical events for this workflow in chronological (ascending) order. Returns id, receivedAt, triggerType and a short payload preview.',
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				limit: {
-					description: 'Max number of events to return. Default 20.',
-					type: 'number'
-				}
-			},
-			type: 'object'
+		fields: {
+			limit: {
+				kind: 'number',
+				description: 'Max number of events to return. Default 20.',
+				default: 20
+			}
 		},
-		name: 'list_events',
-		async run(input: unknown): Promise<string> {
-			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-			const limit = getNumberProp(obj, 'limit') ?? 20;
+		async run({ limit }): Promise<string> {
 			const all = await listAllEventsForWorkflow(workflowId);
 			const slice = all.slice(-Math.max(1, Math.floor(limit)));
 			const out = slice.map((e) => ({
@@ -261,28 +243,19 @@ function makeListEventsTool(workflowId: string): Tool {
 			}));
 			return JSON.stringify({ events: out, returned: out.length, total: all.length });
 		}
-	};
+	});
 }
 
 function makeGetEventTool(workflowId: string, eventSourceId: string): Tool {
-	return {
+	return defineTool<{ id: string }>({
+		name: 'get_event',
 		description:
 			"Fetch full details of a single event (including payload) by id. The event must belong to this workflow's event source.",
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				id: { description: 'Event id', type: 'string' }
-			},
-			required: ['id'],
-			type: 'object'
+		fields: {
+			id: { kind: 'string', description: 'Event id' }
 		},
-		name: 'get_event',
-		async run(input: unknown): Promise<string> {
-			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-			const id = getStringProp(obj, 'id');
-			if (!id) {
-				throw new Error('get_event: `id` is required');
-			}
+		required: ['id'],
+		async run({ id }): Promise<string> {
 			const event = await getEvent(id);
 			if (!event) {
 				throw new Error(`get_event: event not found: ${id}`);
@@ -299,27 +272,22 @@ function makeGetEventTool(workflowId: string, eventSourceId: string): Tool {
 				triggerType: event.triggerType
 			});
 		}
-	};
+	});
 }
 
 function makeListFailedRunsTool(workflowId: string): Tool {
-	return {
+	return defineTool<{ limit: number }>({
+		name: 'list_failed_runs',
 		description:
 			'List recent failed runs for this workflow. Returns runId, eventId, startedAt, and error summary.',
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				limit: {
-					description: 'Max number of runs to return. Default 10.',
-					type: 'number'
-				}
-			},
-			type: 'object'
+		fields: {
+			limit: {
+				kind: 'number',
+				description: 'Max number of runs to return. Default 10.',
+				default: 10
+			}
 		},
-		name: 'list_failed_runs',
-		async run(input: unknown): Promise<string> {
-			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-			const limit = getNumberProp(obj, 'limit') ?? 10;
+		async run({ limit }): Promise<string> {
 			const all = await listFailedRunsForWorkflow(workflowId);
 			const slice = all.slice(0, Math.max(1, Math.floor(limit)));
 			const out = slice.map((r) => ({
@@ -330,27 +298,18 @@ function makeListFailedRunsTool(workflowId: string): Tool {
 			}));
 			return JSON.stringify({ returned: out.length, runs: out, total: all.length });
 		}
-	};
+	});
 }
 
 function makeGetRunTool(workflowId: string): Tool {
-	return {
-		description: 'Fetch a full run including logs by id. The run must belong to this workflow.',
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				runId: { description: 'Run id', type: 'string' }
-			},
-			required: ['runId'],
-			type: 'object'
-		},
+	return defineTool<{ runId: string }>({
 		name: 'get_run',
-		async run(input: unknown): Promise<string> {
-			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-			const runId = getStringProp(obj, 'runId');
-			if (!runId) {
-				throw new Error('get_run: `runId` is required');
-			}
+		description: 'Fetch a full run including logs by id. The run must belong to this workflow.',
+		fields: {
+			runId: { kind: 'string', description: 'Run id' }
+		},
+		required: ['runId'],
+		async run({ runId }): Promise<string> {
 			const run = await getRun(runId);
 			if (!run) {
 				throw new Error(`get_run: run not found: ${runId}`);
@@ -371,39 +330,23 @@ function makeGetRunTool(workflowId: string): Tool {
 				versionId: run.versionId
 			});
 		}
-	};
+	});
 }
 
 function makeRunTestEventTool(workflowId: string): Tool {
-	return {
+	return defineTool<{ event_id: string; source_ts: string }>({
+		name: 'run_test_event',
 		description:
 			"Run a candidate TS source against a specific historical event in isolation. Each call deploys a temporary Worker, invokes it, and tears it down — costs a few seconds of upload latency. Don't burn budget testing trivial things; use it to validate your final candidate against the failing event and a couple of historical ones. Returns { ok, error?, logs_tail } (last 20 log entries).",
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				event_id: { description: 'Historical event id to test against', type: 'string' },
-				source_ts: {
-					description: 'Candidate TypeScript workflow source to test',
-					type: 'string'
-				}
-			},
-			required: ['event_id', 'source_ts'],
-			type: 'object'
+		fields: {
+			event_id: { kind: 'string', description: 'Historical event id to test against' },
+			source_ts: { kind: 'string', description: 'Candidate TypeScript workflow source to test' }
 		},
-		name: 'run_test_event',
-		async run(input: unknown): Promise<string> {
-			const obj = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-			const eventId = getStringProp(obj, 'event_id');
-			const sourceTs = getStringProp(obj, 'source_ts');
-			if (!eventId) {
-				throw new Error('run_test_event: `event_id` is required');
-			}
-			if (!sourceTs) {
-				throw new Error('run_test_event: `source_ts` is required');
-			}
-			const event = await getEvent(eventId);
+		required: ['event_id', 'source_ts'],
+		async run({ event_id, source_ts }): Promise<string> {
+			const event = await getEvent(event_id);
 			if (!event) {
-				throw new Error(`run_test_event: event not found: ${eventId}`);
+				throw new Error(`run_test_event: event not found: ${event_id}`);
 			}
 			const workflow = await getWorkflow(workflowId);
 			if (!workflow) {
@@ -412,7 +355,7 @@ function makeRunTestEventTool(workflowId: string): Tool {
 			if (event.eventSourceId !== workflow.eventSourceId) {
 				throw new Error("run_test_event: event does not belong to this workflow's event source");
 			}
-			const res = await runAgainstEventEphemeral(sourceTs, event, workflow);
+			const res = await runAgainstEventEphemeral(source_ts, event, workflow);
 			const tail = res.logs.slice(-20);
 			return JSON.stringify({
 				durationMs: res.durationMs,
@@ -421,7 +364,7 @@ function makeRunTestEventTool(workflowId: string): Tool {
 				ok: res.ok
 			});
 		}
-	};
+	});
 }
 
 function makeEmitFixedWorkflowTool(
@@ -482,53 +425,31 @@ function makeEmitFixedWorkflowTool(
 }
 
 function makeEmitUnhealableTool(state: { emitted: EmittedPayload | null }): Tool {
-	return {
+	return defineTool<{ category: UnhealableCategory; reason: string }>({
+		name: 'emit_unhealable',
 		description:
 			"Declare the failure is not fixable by changing workflow code. Call this EXACTLY ONCE with a category and an evidence-backed reason. Only use after you've read the source and formed a concrete hypothesis about why no code change would help.",
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				category: {
-					description: 'third_party_outage | credential | input_malformed | capability_gap | other',
-					enum: [...UNHEALABLE_CATEGORIES],
-					type: 'string'
-				},
-				reason: {
-					description:
-						'Evidence-backed explanation: specific error text, observed behavior, or response body that demonstrates the cause is external to the workflow code. 1–3 sentences.',
-					type: 'string'
-				}
+		fields: {
+			category: {
+				kind: 'enum',
+				description: 'third_party_outage | credential | input_malformed | capability_gap | other',
+				values: UNHEALABLE_CATEGORIES
 			},
-			required: ['category', 'reason'],
-			type: 'object'
+			reason: {
+				kind: 'string',
+				description:
+					'Evidence-backed explanation: specific error text, observed behavior, or response body that demonstrates the cause is external to the workflow code. 1–3 sentences.'
+			}
 		},
-		name: 'emit_unhealable',
-		async run(input: unknown): Promise<string> {
-			if (input === null || typeof input !== 'object') {
-				throw new Error('emit_unhealable: expected an object input');
-			}
-			const obj = input as Record<string, unknown>;
-			const { category } = obj;
-			const { reason } = obj;
-			if (typeof category !== 'string') {
-				throw new TypeError('emit_unhealable: `category` must be a string');
-			}
-			if (!UNHEALABLE_CATEGORIES.includes(category as UnhealableCategory)) {
-				throw new Error(
-					`emit_unhealable: \`category\` must be one of ${UNHEALABLE_CATEGORIES.join(', ')}`
-				);
-			}
-			if (typeof reason !== 'string' || reason.trim().length === 0) {
+		required: ['category', 'reason'],
+		async run({ category, reason }): Promise<string> {
+			if (reason.trim().length === 0) {
 				throw new Error('emit_unhealable: `reason` must be a non-empty string');
 			}
-			state.emitted = {
-				category: category as UnhealableCategory,
-				kind: 'unhealable',
-				reason: reason.trim()
-			};
+			state.emitted = { category, kind: 'unhealable', reason: reason.trim() };
 			throw new EmitSuccess(state.emitted);
 		}
-	};
+	});
 }
 
 function formatTerminal(payload: EmittedPayload): string {
