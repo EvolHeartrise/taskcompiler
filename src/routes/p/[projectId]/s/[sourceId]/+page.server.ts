@@ -5,6 +5,7 @@ import { countEventsForSource, listEventsForSource } from '$lib/server/db/querie
 import { listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import { listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
+import { errorMessage } from '$lib/server/util';
 
 // Project ownership is enforced by /p/[projectId]/+layout.server.ts; we scope
 // The event-source lookup by project so /p/A/s/[id-of-B-source] 404s.
@@ -73,15 +74,14 @@ export const actions: Actions = {
 					await tearDownWorkflow(w.id);
 				} catch (err) {
 					console.error('[source-delete] tearDownWorkflow failed', {
-						error: err instanceof Error ? err.message : String(err),
+						error: errorMessage(err),
 						workflowId: w.id
 					});
 				}
 			}
 			await deleteEventSource(source.id);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(500, { delete: { error: `Delete failed: ${msg}` } });
+			return fail(500, { delete: { error: `Delete failed: ${errorMessage(err)}` } });
 		}
 		redirect(303, `/p/${params.projectId}`);
 	}

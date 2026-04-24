@@ -1,6 +1,7 @@
 import { deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 import { projectIdBinding, testScriptName } from '$lib/server/workflows-store';
 import type { Event, RunError, RunLogEntry, Workflow } from '$lib/server/db/types';
+import { errorMessage } from '$lib/server/util';
 import { invokeDispatcher } from './dispatch';
 import { toRunError } from './run-error';
 
@@ -71,7 +72,7 @@ export async function runAgainstEventEphemeral(
 				await deleteWorkflow(scriptName);
 			} catch (error) {
 				console.error('test-runner: failed to delete ephemeral script', {
-					error: error instanceof Error ? error.message : String(error),
+					error: errorMessage(error),
 					scriptName
 				});
 			}

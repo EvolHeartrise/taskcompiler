@@ -1,5 +1,6 @@
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsByEvent, markRunSuperseded } from '$lib/server/db/queries/runs';
+import { errorMessage } from '$lib/server/util';
 import { type ExecuteResult, executeExistingEventForWorkflow } from './executor';
 
 export interface DispatchTally {
@@ -70,7 +71,7 @@ export async function backfillWorkflow(workflowId: string): Promise<BackfillResu
 		(event) => executeExistingEventForWorkflow(event.id, workflowId, { isReplay: true }),
 		(event, error) => {
 			console.error('[backfill] dispatch threw', {
-				error: error instanceof Error ? error.message : String(error),
+				error: errorMessage(error),
 				eventId: event.id,
 				workflowId
 			});

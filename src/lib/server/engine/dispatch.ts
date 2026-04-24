@@ -1,6 +1,7 @@
 import type { Response as CfResponse } from '@cloudflare/workers-types';
 import { getEnv } from '$lib/server/env';
 import type { EventTriggerType, RunError, RunLogEntry } from '$lib/server/db/types';
+import { errorMessage } from '$lib/server/util';
 import { classifyInfraFailure } from './run-error';
 
 interface InvokeResponseBody {
@@ -40,9 +41,11 @@ export async function invokeDispatcher(args: {
 			method: 'POST'
 		});
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
 		return {
-			error: classifyInfraFailure('DispatchNetworkError', `dispatcher fetch threw: ${msg}`),
+			error: classifyInfraFailure(
+				'DispatchNetworkError',
+				`dispatcher fetch threw: ${errorMessage(error)}`
+			),
 			kind: 'infra_error'
 		};
 	}
@@ -61,9 +64,11 @@ export async function invokeDispatcher(args: {
 	try {
 		body = (await response.json()) as InvokeResponseBody;
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
 		return {
-			error: classifyInfraFailure('InvalidDispatchBody', `dispatcher body parse failed: ${msg}`),
+			error: classifyInfraFailure(
+				'InvalidDispatchBody',
+				`dispatcher body parse failed: ${errorMessage(error)}`
+			),
 			kind: 'infra_error'
 		};
 	}

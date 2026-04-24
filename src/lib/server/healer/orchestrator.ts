@@ -5,6 +5,7 @@ import { createVersion, getCurrentVersion } from '$lib/server/db/queries/version
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { finishHealSession, getHealSession } from '$lib/server/db/queries/heal-sessions';
 import { writeVersion } from '$lib/server/workflows-store';
+import { errorMessage } from '$lib/server/util';
 import type { AgentEvent } from '$lib/server/agent/loop';
 import type {
 	HealAgentTranscriptEntry,
@@ -210,7 +211,7 @@ export async function deployHealedVersion(args: {
 		replay = await replayFailedEvents(workflowId);
 	} catch (error) {
 		console.error('healer.deployHealedVersion: replayFailedEvents threw', {
-			error: error instanceof Error ? error.message : String(error),
+			error: errorMessage(error),
 			workflowId
 		});
 	}

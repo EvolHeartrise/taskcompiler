@@ -1,3 +1,4 @@
+import { errorMessage } from '$lib/server/util';
 import type { AgentTool } from './ai-gateway.ts';
 
 export interface ToolCtx {
@@ -49,11 +50,4 @@ export async function runToolCall(
 	} catch (error) {
 		return { ok: false, error: errorMessage(error) };
 	}
-}
-
-function errorMessage(err: unknown): string {
-	if (err instanceof Error) {
-		return err.message;
-	}
-	return String(err);
 }

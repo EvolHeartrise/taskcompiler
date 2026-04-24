@@ -6,6 +6,7 @@ import {
 	listSecretNamesForProject,
 	upsertSecret
 } from '$lib/server/db/queries/secrets';
+import { errorMessage } from '$lib/server/util';
 
 // Project ownership is enforced by /p/[projectId]/+layout.server.ts.
 export const load: PageServerLoad = async ({ params }) => {
@@ -23,8 +24,7 @@ export const actions: Actions = {
 		try {
 			await deleteSecret(params.projectId, name);
 		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
-			return fail(500, { delete: { error: msg } });
+			return fail(500, { delete: { error: errorMessage(error) } });
 		}
 		return { delete: { name, ok: true } };
 	},
@@ -53,8 +53,7 @@ export const actions: Actions = {
 		try {
 			await upsertSecret(params.projectId, name, value);
 		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
-			return fail(500, { upsert: { error: msg } });
+			return fail(500, { upsert: { error: errorMessage(error) } });
 		}
 		return { upsert: { name, ok: true } };
 	}

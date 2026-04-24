@@ -2,6 +2,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import { withEnv } from '$lib/server/env';
 import { generateWorkflow } from '$lib/server/agent/roles/gen';
 import { type BackfillResult, backfillWorkflow } from '$lib/server/engine';
+import { errorMessage } from '$lib/server/util';
 
 export interface GenWorkflowParams {
 	workflowId: string;
@@ -65,7 +66,7 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 						return await backfillWorkflow(params.workflowId);
 					} catch (error) {
 						console.error('[gen-flow] backfill threw', {
-							error: error instanceof Error ? error.message : String(error),
+							error: errorMessage(error),
 							workflowId: params.workflowId
 						});
 						return null;

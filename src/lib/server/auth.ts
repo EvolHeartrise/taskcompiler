@@ -6,6 +6,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { getRequestEvent } from '$app/server';
 import * as schema from './db/auth-schema';
 import { getEnv } from './env';
+import { errorMessage } from './util';
 
 type Auth = ReturnType<typeof buildAuth>;
 
@@ -68,8 +69,9 @@ async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 	} catch (err) {
 		// Fall back to console logging so a misconfigured sender domain doesn't
 		// lock users out during the beta.
-		const msg = err instanceof Error ? err.message : String(err);
-		console.error(`[auth] EMAIL.send failed (${msg}); magic link for ${email}: ${url}`);
+		console.error(
+			`[auth] EMAIL.send failed (${errorMessage(err)}); magic link for ${email}: ${url}`
+		);
 	}
 }
 

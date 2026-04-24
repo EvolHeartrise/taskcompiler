@@ -1,6 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 import { listCronEventSources, markEventSourceFired } from '$lib/server/db/queries/event-sources';
 import { executeSourceEvent } from '$lib/server/engine';
+import { errorMessage } from '$lib/server/util';
 
 export interface CronTickResult {
 	scanned: number;
@@ -41,7 +42,7 @@ export async function handleCronTick(now: number = Date.now()): Promise<CronTick
 		} catch (error) {
 			result.skipped.push({
 				eventSourceId: source.id,
-				reason: `invalid cron: ${expr}${error instanceof Error ? ` (${error.message})` : ''}`
+				reason: `invalid cron: ${expr} (${errorMessage(error)})`
 			});
 			continue;
 		}
@@ -66,7 +67,7 @@ export async function handleCronTick(now: number = Date.now()): Promise<CronTick
 		} catch (error) {
 			result.skipped.push({
 				eventSourceId: source.id,
-				reason: `error: ${error instanceof Error ? error.message : String(error)}`
+				reason: `error: ${errorMessage(error)}`
 			});
 		}
 	}

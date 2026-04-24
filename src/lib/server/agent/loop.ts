@@ -1,3 +1,4 @@
+import { errorMessage } from '$lib/server/util';
 import {
 	createMessage,
 	type AgentMessage,
@@ -100,8 +101,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 				stopReason = 'aborted';
 				break;
 			}
-			const msg = err instanceof Error ? err.message : String(err);
-			emit({ type: 'error', error: msg });
+			emit({ type: 'error', error: errorMessage(err) });
 			stopReason = 'tool_error';
 			break;
 		}
