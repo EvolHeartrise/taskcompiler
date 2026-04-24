@@ -2,10 +2,10 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink } from 'better-auth/plugins';
 import { sveltekitCookies } from 'better-auth/svelte-kit';
+import { env as cfEnv } from 'cloudflare:workers';
 import { drizzle } from 'drizzle-orm/d1';
 import { getRequestEvent } from '$app/server';
 import * as schema from './db/auth-schema';
-import { getEnv } from './env';
 import { errorMessage } from './util';
 
 type Auth = ReturnType<typeof buildAuth>;
@@ -75,15 +75,11 @@ async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 	}
 }
 
-let cached: { env: Env; auth: Auth } | null = null;
+let cached: Auth | null = null;
 
 export function auth(): Auth {
-	const env = getEnv();
-	// Memoize per-isolate while bindings are stable. Workers reuse isolates so
-	// the identity check keeps us from reconstructing Better Auth every request.
-	if (cached && cached.env === env) {
-		return cached.auth;
+	if (!cached) {
+		cached = buildAuth(cfEnv);
 	}
-	cached = { env, auth: buildAuth(env) };
-	return cached.auth;
+	return cached;
 }

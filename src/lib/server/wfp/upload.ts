@@ -1,5 +1,5 @@
 import { transform } from 'sucrase';
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 import { errorMessage, truncate } from '$lib/server/util';
 import {
 	COMPATIBILITY_DATE,
@@ -55,7 +55,6 @@ function transpile(source: string, label: string): string {
 }
 
 function requireEnv(): { accountId: string; token: string } {
-	const env = getEnv();
 	const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 	const token = env.CLOUDFLARE_API_TOKEN;
 	const missing: string[] = [];

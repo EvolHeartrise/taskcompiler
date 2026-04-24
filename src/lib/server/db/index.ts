@@ -1,7 +1,7 @@
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 
 export function getDb() {
-	return getEnv().DB;
+	return env.DB;
 }
 
 export function uuid(): string {

@@ -1,5 +1,4 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
-import { withEnv } from '$lib/server/env';
 import { generateWorkflow } from '$lib/server/agent/roles/gen';
 import { type DispatchTally, backfillWorkflow } from '$lib/server/engine';
 import { errorMessage } from '$lib/server/util';
@@ -24,24 +23,22 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 		step: WorkflowStep
 	): Promise<GenWorkflowResult> {
 		const params = event.payload;
-		const { env } = this;
 
 		const genResult = await step.do(
 			'generate',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
-			async () =>
-				withEnv(env, async () => {
-					const out = await generateWorkflow({
-						name: params.name,
-						prompt: params.prompt,
-						workflowId: params.workflowId
-					});
-					return {
-						sourceTs: out.sourceTs,
-						versionId: out.versionId,
-						workflowId: out.workflowId
-					};
-				})
+			async () => {
+				const out = await generateWorkflow({
+					name: params.name,
+					prompt: params.prompt,
+					workflowId: params.workflowId
+				});
+				return {
+					sourceTs: out.sourceTs,
+					versionId: out.versionId,
+					workflowId: out.workflowId
+				};
+			}
 		);
 
 		if (!params.backfill) {
@@ -54,18 +51,17 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 		const backfill = await step.do(
 			'backfill',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
-			async (): Promise<DispatchTally | null> =>
-				withEnv(env, async () => {
-					try {
-						return await backfillWorkflow(params.workflowId);
-					} catch (error) {
-						console.error('[gen-flow] backfill threw', {
-							error: errorMessage(error),
-							workflowId: params.workflowId
-						});
-						return null;
-					}
-				})
+			async (): Promise<DispatchTally | null> => {
+				try {
+					return await backfillWorkflow(params.workflowId);
+				} catch (error) {
+					console.error('[gen-flow] backfill threw', {
+						error: errorMessage(error),
+						workflowId: params.workflowId
+					});
+					return null;
+				}
+			}
 		);
 
 		return backfill ? { ...genResult, backfill } : genResult;

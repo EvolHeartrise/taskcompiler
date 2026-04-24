@@ -23,19 +23,24 @@ declare global {
 		}
 	}
 
-	interface Env {
-		DB: D1Database;
-		DISPATCHER: DispatchNamespace;
-		CLOUDFLARE_API_TOKEN: string;
-		CLOUDFLARE_ACCOUNT_ID: string;
-		CLOUDFLARE_GATEWAY_NAME: string;
-		GEN_WORKFLOW: Workflow<GenWorkflowParams>;
-		HEAL_WORKFLOW: Workflow<HealWorkflowParams>;
-		EMAIL: SendEmail;
-		BETTER_AUTH_SECRET: string;
-		APP_URL?: string;
-		GOOGLE_CLIENT_ID?: string;
-		GOOGLE_CLIENT_SECRET?: string;
-		EMAIL_FROM?: string;
+	// Augment the wrangler-generated Cloudflare.Env with secrets/vars (which
+	// `wrangler types` doesn't infer) and workflow payload types (which need
+	// the project-local generic params).
+	namespace Cloudflare {
+		interface Env {
+			DB: D1Database;
+			DISPATCHER: DispatchNamespace;
+			CLOUDFLARE_API_TOKEN: string;
+			CLOUDFLARE_ACCOUNT_ID: string;
+			CLOUDFLARE_GATEWAY_NAME: string;
+			GEN_WORKFLOW: Workflow<GenWorkflowParams>;
+			HEAL_WORKFLOW: Workflow<HealWorkflowParams>;
+			EMAIL: SendEmail;
+			BETTER_AUTH_SECRET: string;
+			APP_URL?: string;
+			GOOGLE_CLIENT_ID?: string;
+			GOOGLE_CLIENT_SECRET?: string;
+			EMAIL_FROM?: string;
+		}
 	}
 }

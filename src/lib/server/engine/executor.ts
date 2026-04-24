@@ -7,7 +7,7 @@ import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunStatus } from '$lib/server/db/types';
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 import { errorMessage } from '$lib/server/util';
 import { type DispatchEvent, type InvokeOutcome, invokeDispatcher } from './dispatch';
 
@@ -282,7 +282,6 @@ export async function executeExistingEventForWorkflow(
 			);
 		} else {
 			try {
-				const env = getEnv();
 				await env.HEAL_WORKFLOW.create({
 					id: `heal-${run.id}`,
 					params: {

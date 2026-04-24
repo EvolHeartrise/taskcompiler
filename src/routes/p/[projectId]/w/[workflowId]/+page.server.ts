@@ -14,7 +14,7 @@ import {
 import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { highlightTs } from '$lib/server/highlight';
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 import { errorMessage } from '$lib/server/util';
 
 export interface InFlightStatus {
@@ -90,7 +90,6 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		: null;
 
 	const inFlight: InFlightInfo = {};
-	const env = getEnv();
 
 	if (workflow.currentVersionId === null) {
 		const gen = await fetchInstanceStatus(env.GEN_WORKFLOW, `gen-${workflow.id}`);
