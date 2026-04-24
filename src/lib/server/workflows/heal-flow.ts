@@ -63,8 +63,8 @@ type AgentStepSummary =
 // HEAL_AGENT_MAX_TURNS sits well under the runAgent default of 50 to fit
 // inside the Workflows per-step CPU budget (5 min configurable on Paid).
 // Empirically the model resolves a typical webhook-shape bug in ~10-15
-// turns including the post-fix `run_test_event` validation calls; 15
-// gives modest headroom without inviting 5-min step timeouts.
+// turns including the harness-driven submit_candidate_source iterations;
+// 15 gives modest headroom without inviting 5-min step timeouts.
 //
 // Followup: split the agent loop across multiple step.do calls (one per
 // turn or per N turns) so the per-step budget no longer caps loop length.
@@ -172,6 +172,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 				withLogContext({ step: 'agent-heal' }, async () => {
 					const outcome = await healWorkflow({
 						env,
+						healSessionId,
 						maxTurns: HEAL_AGENT_MAX_TURNS,
 						triggeringRunId,
 						workflowId

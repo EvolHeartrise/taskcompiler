@@ -133,9 +133,9 @@ Set `triggerType` to `cron` or `both` and provide a cron expression (e.g. `0 9 *
              │
              ▼
  heal agent loop (OpenRouter):
-   tools: read_source · list_events · get_event
-          list_failed_runs · get_run · run_test_event
-          emit_fixed_workflow
+   tools: list_events · get_event
+          list_failed_runs · get_run
+          submit_candidate_source · emit_cannot_fix
              │
              ▼
  orchestrator test sweep:
@@ -155,7 +155,7 @@ Set `triggerType` to `cron` or `both` and provide a cron expression (e.g. `0 9 *
    – re-executes each against the new version
 ```
 
-The gate is the orchestrator's sweep, not the agent's self-test — the agent may iterate with `run_test_event`, but only the orchestrator can deploy.
+The agent converges by calling `submit_candidate_source`, which the harness tests against every previously-failing event (resuming from the last failure on re-submit). The orchestrator's sweep is the regression gate against previously-passing events; only it can deploy.
 
 ## Writing good prompts
 
