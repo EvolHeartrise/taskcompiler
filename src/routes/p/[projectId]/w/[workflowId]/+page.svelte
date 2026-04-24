@@ -69,6 +69,20 @@
 		return new Date(ts).toLocaleString();
 	}
 
+	// Avoid SSR/CSR hydration mismatch: toLocaleString() depends on host locale +
+	// timezone, which differ between the CF Worker (UTC) and the browser. Render
+	// a stable placeholder on SSR + first client render, then swap in the real
+	// browser-formatted string after mount.
+	let mounted = $state(false);
+	$effect(() => {
+		mounted = true;
+	});
+	function fmtClient(ts: number | null | undefined): string {
+		if (!ts) return '—';
+		if (!mounted) return '';
+		return fmt(ts);
+	}
+
 	function duration(startedAt: number, finishedAt: number | null): string {
 		if (finishedAt === null) return 'running…';
 		const ms = finishedAt - startedAt;
@@ -197,7 +211,7 @@
 				event: {data.eventSource.name}
 			</a>
 			<span class="mono muted">{data.workflow.id}</span>
-			<span class="muted">· created {fmt(data.workflow.createdAt)}</span>
+			<span class="muted">· created {fmtClient(data.workflow.createdAt)}</span>
 			{#if data.currentVersion}
 				<span class="muted">· v{data.currentVersion.version}</span>
 			{/if}
@@ -438,7 +452,7 @@
 								<div class="row-head">
 									<span class="mono">{shortId(ev.id)}</span>
 									<span class="chip small">{ev.triggerType}</span>
-									<span class="muted small">{fmt(ev.receivedAt)}</span>
+									<span class="muted small">{fmtClient(ev.receivedAt)}</span>
 								</div>
 								<div class="row-body">
 									<code class="preview">{truncate(safeJson(ev.payload), 200)}</code>
@@ -477,7 +491,7 @@
 								<div class="row-head">
 									<span class="mono">{shortId(run.id)}</span>
 									<span class="badge {run.status}">{run.status}</span>
-									<span class="muted small">{fmt(run.startedAt)}</span>
+									<span class="muted small">{fmtClient(run.startedAt)}</span>
 									<span class="muted small">· {duration(run.startedAt, run.finishedAt)}</span>
 									{#if run.isReplay}<span class="chip small">replay</span>{/if}
 								</div>
@@ -546,7 +560,7 @@
 								<div class="row-head">
 									<span class="mono">{shortId(run.id)}</span>
 									<span class="badge failed">failed</span>
-									<span class="muted small">{fmt(run.startedAt)}</span>
+									<span class="muted small">{fmtClient(run.startedAt)}</span>
 								</div>
 								<div class="row-body">
 									{#if run.error}
@@ -623,8 +637,8 @@
 								<div class="row-head">
 									<span class="mono">{shortId(h.id)}</span>
 									<span class="badge {h.status}">{h.status}</span>
-									<span class="muted small">started {fmt(h.startedAt)}</span>
-									<span class="muted small">· finished {fmt(h.finishedAt)}</span>
+									<span class="muted small">started {fmtClient(h.startedAt)}</span>
+									<span class="muted small">· finished {fmtClient(h.finishedAt)}</span>
 								</div>
 								<div class="row-body muted small">
 									triggered by run {shortId(h.triggeringRunId)}
@@ -707,7 +721,7 @@
 														<li>
 															<div class="t-head">
 																<span class="chip small">{t.role}</span>
-																<span class="muted small">{fmt(t.ts)}</span>
+																<span class="muted small">{fmtClient(t.ts)}</span>
 															</div>
 															<pre>{t.message}</pre>
 															{#if t.data !== undefined}
@@ -746,7 +760,7 @@
 					>
 						{#each data.versions as v (v.id)}
 							<option value={v.id} selected={selectedVersion?.id === v.id}>
-								v{v.version} · {v.createdBy} · {fmt(v.createdAt)}
+								v{v.version} · {v.createdBy} · {fmtClient(v.createdAt)}
 								{v.id === data.currentVersion?.id ? '(current)' : ''}
 							</option>
 						{/each}
@@ -758,7 +772,7 @@
 				<div class="version-meta">
 					<div class="kv"><span>version</span>{selectedVersion.version}</div>
 					<div class="kv"><span>createdBy</span>{selectedVersion.createdBy}</div>
-					<div class="kv"><span>createdAt</span>{fmt(selectedVersion.createdAt)}</div>
+					<div class="kv"><span>createdAt</span>{fmtClient(selectedVersion.createdAt)}</div>
 					{#if selectedVersion.parentVersionId}
 						<div class="kv">
 							<span>parent</span>
