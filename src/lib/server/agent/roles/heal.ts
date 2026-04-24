@@ -82,7 +82,6 @@ The workflow module is a single TypeScript file exporting \`export default async
 No imports from node_modules, no relative imports. \`event\` is \`{ body, headers }\` at runtime — \`body\` is the parsed payload, \`headers\` is a lowercased Record<string, string> with auth/signature headers redacted to \`"<redacted>"\`. It's typed \`unknown\`, so validate the shape inside \`run\`.
 
 ## Your tools
-- read_source: current workflow TS
 - list_events / get_event: inspect historical events for this workflow
 - list_failed_runs / get_run: inspect recent failures
 - run_test_event: run a candidate source against a specific historical event in isolation (deploys and tears down a temp Worker per call). Each call costs a few seconds of upload latency, so don't burn budget testing trivial things — use it to validate your final candidate against the failing event and a couple of historical ones.
@@ -90,7 +89,7 @@ No imports from node_modules, no relative imports. \`event\` is \`{ body, header
 - emit_unhealable: terminal. Call when the failure is NOT fixable by changing workflow code (see below).
 
 ## Principles
-- Diagnose first. Read the error + stack + logs and inspect the failing event payload. Form a hypothesis. THEN read the source.
+- Diagnose first. Read the error + stack + logs and inspect the failing event payload against the source. Form a hypothesis before editing.
 - Change as little as possible. Do not rewrite the workflow. Patch the specific bug.
 - The most common failure classes: unvalidated event shape, missing ctx.secret, bad HTTP status not checked, JSON parse on a non-JSON response, undefined path in event.
 - After your fix, run_test_event on the failing event AND at least two historical events to confirm no regressions.
@@ -193,20 +192,9 @@ function buildUserMessage(args: {
 	parts.push(`## Historical events available: ${args.historicalEventCount}`);
 	parts.push('');
 	parts.push(
-		'Diagnose the root cause. Use `read_source`, `list_events`, `get_event`, `list_failed_runs`, `get_run`, `run_test_event` to explore. When you have a fix, call `emit_fixed_workflow` ONCE with the complete new module source. Your fix must not throw on any historical event — the orchestrator will verify. Prefer minimal, surgical changes.'
+		'Diagnose the root cause. Use `list_events`, `get_event`, `list_failed_runs`, `get_run`, `run_test_event` to explore. When you have a fix, call `emit_fixed_workflow` ONCE with the complete new module source. Your fix must not throw on any historical event — the orchestrator will verify. Prefer minimal, surgical changes.'
 	);
 	return parts.join('\n');
-}
-
-function makeReadSourceTool(sourceTs: string): Tool {
-	return defineTool({
-		name: 'read_source',
-		description: 'Read the current workflow TypeScript source. Returns the full module text.',
-		fields: {},
-		async run(): Promise<string> {
-			return sourceTs;
-		}
-	});
 }
 
 function makeListEventsTool(env: Env, workflowId: string): Tool {
@@ -439,7 +427,6 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	const controller = new AbortController();
 
 	const tools: Tool[] = [
-		makeReadSourceTool(currentSource),
 		makeListEventsTool(opts.env, opts.workflowId),
 		makeGetEventTool(opts.env, opts.workflowId, workflow.eventSourceId),
 		makeListFailedRunsTool(opts.env, opts.workflowId),
