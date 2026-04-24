@@ -26,6 +26,12 @@ export const EVENTS = {
 	HEAL_SLOT_RELEASED: 'heal.slot_released',
 	HEAL_SLOT_RELEASE_FAILED: 'heal.slot_release_failed',
 
+	// Agent-harness submit_candidate_source loop (heal role).
+	HEAL_SUBMIT_STARTED: 'heal.submit.started',
+	HEAL_SUBMIT_EVENT_PASSED: 'heal.submit.event_passed',
+	HEAL_SUBMIT_EVENT_FAILED: 'heal.submit.event_failed',
+	HEAL_SUBMIT_CONVERGED: 'heal.submit.converged',
+
 	// Inside a Workflow entrypoint.
 	WORKFLOW_RUN_START: 'workflow.run.start',
 	WORKFLOW_RUN_END: 'workflow.run.end',

@@ -5,25 +5,41 @@ import { getDb } from '$lib/server/db';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/events';
-import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
+import {
+	getRun,
+	listFailedRunsByEvent,
+	listFailedRunsForWorkflow
+} from '$lib/server/db/queries/runs';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
-import { EmitSuccess, makeTypecheckedEmitTool, wrapTerminal } from './shared.ts';
+import { typecheckWorkflow } from '../typecheck/service';
+import { EmitSuccess, wrapTerminal } from './shared.ts';
 import { buildTriageBlock } from '$lib/server/healer/triage';
-import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
+import type {
+	Event,
+	RunError,
+	RunLogEntry,
+	UnhealableCategory,
+	Workflow
+} from '$lib/server/db/types';
 import { errorMessage, truncate } from '$lib/server/util';
+
+const log = createLogger('heal-submit');
 
 export interface HealOptions {
 	env: Env;
 	workflowId: string;
 	triggeringRunId: string;
+	healSessionId?: string;
 	model?: string;
 	onEvent?: (e: AgentEvent) => void;
 	maxTurns?: number;
 	maxTokens?: number;
 }
 
-// Heal runs include the full candidate source in each emit_fixed_workflow
+// Heal runs include the full candidate source in each submit_candidate_source
 // call, so 4k tokens trips out on non-trivial workflows. Bumped only for
 // heal — gen-flow generates from a blank slate and doesn't need the budget.
 const HEAL_MAX_TOKENS = 8192;
@@ -86,24 +102,22 @@ The workflow module is a single TypeScript file exporting \`export default async
 No imports from node_modules, no relative imports. \`event\` is \`{ body, headers }\` at runtime — \`body\` is the parsed payload, \`headers\` is a lowercased Record<string, string> with auth/signature headers redacted to \`"<redacted>"\`. It's typed \`unknown\`, so validate the shape inside \`run\`.
 
 ## Your tools
-- list_events / get_event: inspect historical events for this workflow
-- list_failed_runs / get_run: inspect recent failures
-- run_test_event: run a candidate source against a specific historical event in isolation (deploys and tears down a temp Worker per call). Each call costs a few seconds of upload latency, so don't burn budget testing trivial things — use it to validate your final candidate against the failing event and a couple of historical ones.
-- emit_fixed_workflow: terminal. Call when a code change fixes the failure.
+- list_events / get_event: inspect historical events for this workflow. These are read-only; if you need multiple events, emit all get_event calls in ONE turn (parallel tool use).
+- list_failed_runs / get_run: inspect recent failures. Same rule — batch read-only reads in a single turn.
+- submit_candidate_source: submit your candidate fix. The harness type-checks it, then runs it against every previously-failing event in chronological order. On the first test failure it returns structured feedback (event_id, payload preview, error, log_tail) — revise and resubmit. The next submit resumes testing from the failing event, so events already passed stay passed. When every failed event passes, the heal converges automatically.
 - emit_cannot_fix: terminal. Call when the failure is NOT fixable by changing workflow code (upstream outage, missing/expired secret, structurally alien input, or a capability gap in the ctx surface). The tool description has the full criteria.
 
 ## Principles
-- Diagnose first. Read the error + stack + logs and inspect the failing event payload against the source. Form a hypothesis before editing.
+- Diagnose first. Read the error + stack + logs and inspect the failing event payload against the source. A TRIAGE block at the top of the user message already classifies the error, shows the failing line's source context, and lists canary events with distinct payload shapes — skim it before calling any tools.
 - Change as little as possible. Do not rewrite the workflow. Patch the specific bug.
 - The most common failure classes: unvalidated event shape, missing ctx.secret, bad HTTP status not checked, JSON parse on a non-JSON response, undefined path in event.
-- After your fix, run_test_event on the failing event AND at least two historical events to confirm no regressions.
 - Keep the run fail-fast semantics — don't swallow exceptions.
 
 ## Convergence
-Call exactly ONE terminal tool: \`emit_fixed_workflow\` on success, or \`emit_cannot_fix\` if the failure is not code-fixable. Strongly prefer fixing — a wrong escalation costs the user more than a wrong fix. If you're not sure, attempt a fix. Do not emit partial or placeholder code.
+Success comes from submit_candidate_source passing against every failed event — no separate "I'm done" signal is needed. If you decide the failure isn't code-fixable, call emit_cannot_fix instead. Strongly prefer fixing — a wrong escalation costs the user more than a wrong fix. Do not emit partial or placeholder code.
 
-## Typecheck gate on emit_fixed_workflow
-The source you emit is type-checked against the Ctx interface. \`ctx.secret\` accepts only the project's current secret names (listed in the user message); a typo or unknown name is a TS error. If emit_fixed_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_fixed_workflow again.`;
+## Typecheck gate on submit_candidate_source
+The source you submit is type-checked against the Ctx interface before any test runs. \`ctx.secret\` accepts only the project's current secret names (listed in the user message); a typo or unknown name is a TS error. If submit_candidate_source returns status="typecheck_failed" with diagnostics, read them, fix the code, and submit again.`;
 
 function formatJson(value: unknown, opts: { pretty?: boolean; max?: number } = {}): string {
 	const max = opts.max ?? 4000;
@@ -200,7 +214,7 @@ function buildUserMessage(args: {
 	parts.push(`## Historical events available: ${args.historicalEvents.length}`);
 	parts.push('');
 	parts.push(
-		"Diagnose the root cause. The TRIAGE block above already classifies the error and shows source context for the failing line — don't re-derive those. Use `list_events`, `get_event`, `list_failed_runs`, `get_run`, `run_test_event` to explore; if you need multiple events, emit all `get_event` calls in one turn. When you have a fix, call `emit_fixed_workflow` ONCE with the complete new module source. Prefer minimal, surgical changes."
+		"Diagnose the root cause. The TRIAGE block above already classifies the error and shows source context for the failing line — don't re-derive those. Use `list_events`, `get_event`, `list_failed_runs`, `get_run` for exploration (batch parallel calls in one turn). When you're ready, call `submit_candidate_source` with the full fixed module. The harness will test it against every previously-failing event and either converge or return structured feedback. Prefer minimal, surgical changes."
 	);
 	return parts.join('\n');
 }
@@ -318,37 +332,177 @@ function makeGetRunTool(env: Env, workflowId: string): Tool {
 	});
 }
 
-function makeRunTestEventTool(env: Env, workflowId: string): Tool {
-	return defineTool<{ event_id: string; source_ts: string }>({
-		name: 'run_test_event',
+interface SubmitCandidateDeps {
+	env: Env;
+	workflow: Workflow;
+	failedEvents: readonly Event[];
+	secretNames: readonly string[];
+	healSessionId: string | undefined;
+	state: { emitted: EmittedPayload | null };
+}
+
+interface SubmitCursor {
+	passedEventIds: Set<string>;
+	resumeEventId: string | null;
+	lastSubmittedSource: string | null;
+	submitCount: number;
+}
+
+function topLevelKeys(payload: unknown): string[] {
+	if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+		return [];
+	}
+	return Object.keys(payload as Record<string, unknown>);
+}
+
+function payloadPreview(payload: unknown, max = 500): string {
+	let str: string;
+	try {
+		str = JSON.stringify(payload);
+	} catch {
+		str = String(payload);
+	}
+	return truncate(str, max);
+}
+
+// Closure-scoped cursor. The tool is per-run (constructed inside
+// healWorkflow), so this map lives exactly as long as one agent loop.
+function makeSubmitCandidateSourceTool(deps: SubmitCandidateDeps): Tool {
+	const cursor: SubmitCursor = {
+		lastSubmittedSource: null,
+		passedEventIds: new Set<string>(),
+		resumeEventId: null,
+		submitCount: 0
+	};
+
+	return defineTool<{ source_ts: string; summary: string }>({
+		name: 'submit_candidate_source',
 		description:
-			"Run a candidate TS source against a specific historical event in isolation. Each call deploys a temporary Worker, invokes it, and tears it down — costs a few seconds of upload latency. Don't burn budget testing trivial things; use it to validate your final candidate against the failing event and a couple of historical ones. Returns { ok, error?, logs_tail } (last 20 log entries).",
+			'Submit a candidate workflow TypeScript source. The harness type-checks it, then runs it against every historical event that previously failed, in chronological order. On the first test failure it returns a structured result ({ status: "test_failed", event_id, event_position, event_payload_preview, error, log_tail, hint }); revise and resubmit — the next submit resumes from that event. If every failed event passes, the heal converges automatically and you DO NOT need to call any other terminal tool. Supply `summary` with a one-sentence description of the fix.',
 		fields: {
-			event_id: { kind: 'string', description: 'Historical event id to test against' },
-			source_ts: { kind: 'string', description: 'Candidate TypeScript workflow source to test' }
+			source_ts: {
+				kind: 'string',
+				description:
+					'Full TypeScript source of the workflow module. Must export a default async function `run(event, ctx)`.'
+			},
+			summary: {
+				kind: 'string',
+				description: 'One-sentence summary of the fix applied.'
+			}
 		},
-		required: ['event_id', 'source_ts'],
-		async run({ event_id, source_ts }): Promise<string> {
-			const db = getDb(env);
-			const event = await getEvent(db, event_id);
-			if (!event) {
-				throw new Error(`run_test_event: event not found: ${event_id}`);
-			}
-			const workflow = await getWorkflow(db, workflowId);
-			if (!workflow) {
-				throw new Error(`run_test_event: workflow not found: ${workflowId}`);
-			}
-			if (event.eventSourceId !== workflow.eventSourceId) {
-				throw new Error("run_test_event: event does not belong to this workflow's event source");
-			}
-			const res = await runAgainstEventEphemeral(env, source_ts, event, workflow);
-			const tail = res.logs.slice(-20);
-			return JSON.stringify({
-				durationMs: res.durationMs,
-				error: res.error,
-				logs_tail: tail,
-				ok: res.ok
+		required: ['source_ts', 'summary'],
+		async run({ source_ts, summary }): Promise<string> {
+			cursor.submitCount += 1;
+			const submitIndex = cursor.submitCount;
+			log.info(EVENTS.HEAL_SUBMIT_STARTED, {
+				heal_session_id: deps.healSessionId,
+				submit_index: submitIndex,
+				total_failed_events: deps.failedEvents.length,
+				passed_so_far: cursor.passedEventIds.size,
+				resume_event_id: cursor.resumeEventId
 			});
+
+			// Typecheck first — a failing TS check is cheap to return and
+			// avoids burning upload latency on a source that can't compile.
+			const tc = typecheckWorkflow(deps.secretNames, source_ts);
+			if (!tc.ok) {
+				return JSON.stringify({
+					status: 'typecheck_failed',
+					diagnostics: tc.diagnostics,
+					hint: 'Fix the TypeScript errors above and call submit_candidate_source again.'
+				});
+			}
+
+			// Queue: events we haven't marked passed yet, in chronological order.
+			// "Continue from failure": if we have a resumeEventId, start there;
+			// otherwise start from the oldest un-passed failed event.
+			const remaining = deps.failedEvents.filter((e) => !cursor.passedEventIds.has(e.id));
+
+			if (remaining.length === 0) {
+				// Nothing to test — treat this as converged. Shouldn't normally
+				// happen (there would have been no heal trigger), but guard it.
+				cursor.lastSubmittedSource = source_ts;
+				deps.state.emitted = { kind: 'fixed', sourceTs: source_ts, summary };
+				log.info(EVENTS.HEAL_SUBMIT_CONVERGED, {
+					heal_session_id: deps.healSessionId,
+					total_failed_events: 0,
+					submits: submitIndex
+				});
+				throw new EmitSuccess(deps.state.emitted);
+			}
+
+			let startIdx = 0;
+			if (cursor.resumeEventId !== null) {
+				const idx = remaining.findIndex((e) => e.id === cursor.resumeEventId);
+				if (idx >= 0) {
+					startIdx = idx;
+				}
+			}
+
+			const sameAsLast = cursor.lastSubmittedSource === source_ts;
+			cursor.lastSubmittedSource = source_ts;
+
+			for (let i = startIdx; i < remaining.length; i++) {
+				const event = remaining[i]!;
+				const totalPosition = deps.failedEvents.findIndex((e) => e.id === event.id) + 1;
+				const positionStr = `${totalPosition} of ${deps.failedEvents.length}`;
+
+				const res = await runAgainstEventEphemeral(deps.env, source_ts, event, deps.workflow);
+				if (res.ok) {
+					cursor.passedEventIds.add(event.id);
+					log.info(EVENTS.HEAL_SUBMIT_EVENT_PASSED, {
+						heal_session_id: deps.healSessionId,
+						submit_index: submitIndex,
+						event_id: event.id,
+						event_position: positionStr,
+						durationMs: res.durationMs
+					});
+					continue;
+				}
+
+				// Fail — park the cursor, emit feedback, let the agent revise.
+				cursor.resumeEventId = event.id;
+				log.info(EVENTS.HEAL_SUBMIT_EVENT_FAILED, {
+					heal_session_id: deps.healSessionId,
+					submit_index: submitIndex,
+					event_id: event.id,
+					event_position: positionStr,
+					error_name: res.error?.name ?? null,
+					error_message: res.error?.message ?? null
+				});
+
+				const response: Record<string, unknown> = {
+					status: 'test_failed',
+					event_id: event.id,
+					event_position: positionStr,
+					event_top_level_keys: topLevelKeys(event.payload),
+					event_payload_preview: payloadPreview(event.payload),
+					error: res.error
+						? { name: res.error.name, message: res.error.message }
+						: { name: 'Error', message: 'unknown error' },
+					log_tail: res.logs.slice(-10),
+					hint:
+						'Revise the source and call submit_candidate_source again. The next submit resumes testing from this event; events already passed (' +
+						cursor.passedEventIds.size +
+						'/' +
+						deps.failedEvents.length +
+						') will not be re-tested.'
+				};
+				if (sameAsLast) {
+					response.note =
+						'Same source as your previous submit — the outcome is unchanged. Revise and resubmit.';
+				}
+				return JSON.stringify(response);
+			}
+
+			// All remaining failed events passed — converged.
+			deps.state.emitted = { kind: 'fixed', sourceTs: source_ts, summary };
+			log.info(EVENTS.HEAL_SUBMIT_CONVERGED, {
+				heal_session_id: deps.healSessionId,
+				total_failed_events: deps.failedEvents.length,
+				submits: submitIndex
+			});
+			throw new EmitSuccess(deps.state.emitted);
 		}
 	});
 }
@@ -415,6 +569,32 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	const secretMetas = await listSecretNamesForProject(db, workflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
 
+	// Events to re-test against. One entry per distinct event where the most
+	// recent run failed; oldest-first so the submit loop walks events in
+	// chronological order. The triggering event is always included (it just
+	// failed), and duplicates are collapsed by event_id.
+	const failedRuns = await listFailedRunsByEvent(db, opts.workflowId);
+	const failedEventIds = new Set<string>();
+	const failedEventList: Event[] = [];
+	for (const run of [...failedRuns].toSorted((a, b) => a.startedAt - b.startedAt)) {
+		if (failedEventIds.has(run.eventId)) {
+			continue;
+		}
+		const ev = await getEvent(db, run.eventId);
+		if (!ev) {
+			continue;
+		}
+		failedEventIds.add(ev.id);
+		failedEventList.push(ev);
+	}
+	// Defensive: if for some reason the triggering event isn't in the failed
+	// set (e.g. run status was updated mid-flight), append it so the agent's
+	// candidate is at least tested against the event that triggered this heal.
+	if (failedEvent && !failedEventIds.has(failedEvent.id)) {
+		failedEventList.push(failedEvent);
+		failedEventIds.add(failedEvent.id);
+	}
+
 	const userMessage = buildUserMessage({
 		availableSecrets: secretNames,
 		currentSource,
@@ -427,10 +607,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		workflowName: workflow.name
 	});
 
-	const emitState: { attempts: number; emitted: EmittedPayload | null } = {
-		attempts: 0,
-		emitted: null
-	};
+	const emitState: { emitted: EmittedPayload | null } = { emitted: null };
 	const controller = new AbortController();
 
 	const tools: Tool[] = [
@@ -438,16 +615,14 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		makeGetEventTool(opts.env, opts.workflowId, workflow.eventSourceId),
 		makeListFailedRunsTool(opts.env, opts.workflowId),
 		makeGetRunTool(opts.env, opts.workflowId),
-		makeRunTestEventTool(opts.env, opts.workflowId),
 		wrapTerminal<EmittedPayload>(
-			makeTypecheckedEmitTool<EmittedPayload>({
-				name: 'emit_fixed_workflow',
-				description:
-					'Deliver the corrected workflow. Call this EXACTLY ONCE with the full TypeScript module source and a short summary of the fix. This is the only way to finish the task for a code-fixable failure.',
+			makeSubmitCandidateSourceTool({
+				env: opts.env,
+				failedEvents: failedEventList,
+				healSessionId: opts.healSessionId,
 				secretNames,
-				maxAttempts: 2,
 				state: emitState,
-				buildPayload: ({ sourceTs, summary }) => ({ kind: 'fixed', sourceTs, summary })
+				workflow
 			}),
 			controller,
 			formatTerminal
