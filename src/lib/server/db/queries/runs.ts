@@ -1,4 +1,5 @@
-import { getDb, mapRow, now, uuid } from '../index.ts';
+import { getDb, now, uuid } from '../index.ts';
+import { mapRow } from '../mappers.ts';
 import { parseJson } from '$lib/server/util';
 import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
 
