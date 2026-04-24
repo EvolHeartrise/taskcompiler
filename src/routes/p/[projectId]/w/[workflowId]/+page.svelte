@@ -265,11 +265,15 @@
 			)}
 		>
 			{t.label}
-			{#if t.id === 'events' && data.stats.totalFailed > 0}
-				<span class="tab-count">{data.stats.totalFailed}</span>
+			{#if t.id === 'events'}
+				<span class="tab-count" class:tab-count-hidden={data.stats.totalFailed === 0}
+					>{data.stats.totalFailed || 0}</span
+				>
 			{/if}
-			{#if t.id === 'healings' && data.stats.totalHeals > 0}
-				<span class="tab-count">{data.stats.totalHeals}</span>
+			{#if t.id === 'healings'}
+				<span class="tab-count" class:tab-count-hidden={data.stats.totalHeals === 0}
+					>{data.stats.totalHeals || 0}</span
+				>
 			{/if}
 		</a>
 	{/each}
@@ -911,6 +915,14 @@
 		padding: 0 7px;
 		font-size: 11px;
 		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+		min-width: 1.5ch;
+		text-align: center;
+	}
+	/* Always render the badge so tab widths stay stable when counts transition
+	   0 ↔ n. `visibility: hidden` keeps the layout box intact. */
+	.tab-count-hidden {
+		visibility: hidden;
 	}
 	.grid {
 		display: grid;
@@ -1391,6 +1403,8 @@
 		max-height: 560px;
 		overflow: auto;
 		border-radius: 4px;
+		width: 100%;
+		box-sizing: border-box;
 	}
 	.code :global(pre) {
 		padding: 10px 12px;
@@ -1399,6 +1413,8 @@
 		white-space: pre;
 		tab-size: 2;
 		border-radius: 4px;
+		max-width: 100%;
+		box-sizing: border-box;
 	}
 	.code :global(pre code) {
 		font-family: inherit;
