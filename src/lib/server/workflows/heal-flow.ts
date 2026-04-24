@@ -51,6 +51,10 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 	): Promise<HealWorkflowResult> {
 		const { workflowId, triggeringRunId } = event.payload;
 
+		// See gen-flow.ts for the rationale on this synchronous binding touch —
+		// it prevents step.do callbacks from hanging on the first lazy env access.
+		void this.env.DISPATCHER;
+
 		const healSessionId = await step.do('create-heal-session', async () => {
 			const session = await createHealSession({ triggeringRunId, workflowId });
 			return session.id;
