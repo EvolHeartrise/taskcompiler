@@ -1,4 +1,5 @@
-import { getDb, mapRow, now, parseJson, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
+import { parseJson } from '$lib/server/util';
 import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
 
 interface RunRow {
@@ -24,7 +25,7 @@ function rowToRun(row: RunRow): Run {
 		error: parseJson<RunError>(row.error_json),
 		isReplay: row.is_replay !== 0,
 		logs: parseJson<RunLogEntry[]>(row.logs_json),
-		result: row.result_json === null ? null : (JSON.parse(row.result_json) as unknown)
+		result: parseJson<unknown>(row.result_json)
 	};
 }
 

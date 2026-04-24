@@ -1,4 +1,5 @@
 import { getDb, mapRow, now, uuid } from '../index.ts';
+import { parseJsonOrThrow } from '$lib/server/util';
 import type { Event, EventTriggerType } from '../types.ts';
 
 interface EventRow {
@@ -14,8 +15,8 @@ interface EventRow {
 function rowToEvent(row: EventRow): Event {
 	return {
 		...mapRow<Omit<Event, 'payload' | 'headers'>>(row, ['payload_json', 'headers_json']),
-		headers: JSON.parse(row.headers_json) as Record<string, string>,
-		payload: JSON.parse(row.payload_json) as unknown
+		headers: parseJsonOrThrow<Record<string, string>>(row.headers_json, 'event.headers_json'),
+		payload: parseJsonOrThrow<unknown>(row.payload_json, 'event.payload_json')
 	};
 }
 

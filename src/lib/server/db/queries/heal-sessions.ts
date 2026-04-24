@@ -1,4 +1,5 @@
-import { getDb, mapRow, now, parseJson, uuid } from '../index.ts';
+import { getDb, mapRow, now, uuid } from '../index.ts';
+import { parseJson } from '$lib/server/util';
 import type {
 	HealAgentTranscriptEntry,
 	HealSession,

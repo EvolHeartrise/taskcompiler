@@ -12,13 +12,6 @@ export function now(): number {
 	return Date.now();
 }
 
-export function parseJson<T>(s: string | null): T | null {
-	if (s === null) {
-		return null;
-	}
-	return JSON.parse(s) as T;
-}
-
 // Convert a snake_case row from D1 to its camelCase domain shape. Pass
 // `skip` to exclude columns the caller will layer on top (JSON-decoded or
 // boolean-coerced fields); the returned object is cast to the caller's
