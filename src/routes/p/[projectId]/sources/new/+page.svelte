@@ -1,14 +1,12 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
-	import type { PageProps } from './$types';
+	import { createEventSourceForProject } from './data.remote';
 
-	let { form }: PageProps = $props();
 	let projectId = $derived(page.params.projectId!);
 
-	const initial = untrack(() => form);
+	const initial = untrack(() => createEventSourceForProject.result);
 	let name = $state(initial?.values?.name ?? '');
 	let trigger = $state<'webhook' | 'cron'>(
 		(initial?.values?.trigger as 'webhook' | 'cron' | undefined) ?? 'webhook'
@@ -16,6 +14,7 @@
 	let cronExpr = $state(initial?.values?.cronExpr ?? '');
 
 	let needsCron = $derived(trigger === 'cron');
+	const result = $derived(createEventSourceForProject.result);
 </script>
 
 <div class="page-head">
@@ -29,11 +28,12 @@
 	<a href={resolve('/p/[projectId]', { projectId })} class="back">← Back</a>
 </div>
 
-{#if form?.error}
-	<div class="alert">{form.error}</div>
+{#if result?.error}
+	<div class="alert">{result.error}</div>
 {/if}
 
-<form method="POST" use:enhance>
+<form {...createEventSourceForProject}>
+	<input type="hidden" name="projectId" value={projectId} />
 	<label class="field">
 		<span>Name</span>
 		<input

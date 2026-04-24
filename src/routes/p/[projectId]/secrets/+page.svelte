@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import type { PageProps } from './$types';
+	import { page } from '$app/state';
+	import { deleteSecret, getSecrets, upsertSecret } from './data.remote';
 
-	let { data, form }: PageProps = $props();
+	let projectId = $derived(page.params.projectId!);
+	let secretsQuery = $derived(getSecrets(projectId));
 
 	let newName = $state('');
 	let newValue = $state('');
@@ -12,8 +13,8 @@
 		return new Date(ts).toLocaleString();
 	}
 
-	const upsertResult = $derived(form?.upsert);
-	const deleteResult = $derived(form?.delete);
+	const upsertResult = $derived(upsertSecret.result);
+	const deleteResult = $derived(deleteSecret.result);
 </script>
 
 <svelte:head><title>Secrets · Runely</title></svelte:head>
@@ -30,17 +31,17 @@
 </div>
 
 {#if upsertResult}
-	{#if 'ok' in upsertResult && upsertResult.ok}
+	{#if upsertResult.ok}
 		<div class="result ok">Saved <b>{upsertResult.name}</b>.</div>
-	{:else if 'error' in upsertResult}
+	{:else}
 		<div class="alert">{upsertResult.error}</div>
 	{/if}
 {/if}
 
 {#if deleteResult}
-	{#if 'ok' in deleteResult && deleteResult.ok}
+	{#if deleteResult.ok}
 		<div class="result ok">Deleted <b>{deleteResult.name}</b>.</div>
-	{:else if 'error' in deleteResult}
+	{:else}
 		<div class="alert">{deleteResult.error}</div>
 	{/if}
 {/if}
@@ -48,15 +49,12 @@
 <div class="card">
 	<h2>Add or update a secret</h2>
 	<form
-		method="POST"
-		action="?/upsert"
-		use:enhance={() => {
-			return async ({ update }) => {
-				await update({ reset: false });
-				newValue = '';
-			};
-		}}
+		{...upsertSecret.enhance(async ({ submit }) => {
+			await submit();
+			newValue = '';
+		})}
 	>
+		<input type="hidden" name="projectId" value={projectId} />
 		<div class="row">
 			<label class="field grow">
 				<span>Name</span>
@@ -92,58 +90,55 @@
 </div>
 
 <div class="card">
-	<h2>Your secrets <span class="muted small">({data.secrets.length})</span></h2>
-	{#if data.secrets.length === 0}
-		<div class="muted small">No secrets yet. Add one above.</div>
-	{:else}
-		<ul class="rows">
-			{#each data.secrets as s (s.name)}
-				<li>
-					<div class="row-head">
-						<code class="name">{s.name}</code>
-						<span class="muted small">updated {fmt(s.updatedAt)}</span>
-					</div>
-					<div class="row-actions">
-						<form
-							method="POST"
-							action="?/upsert"
-							use:enhance={() => {
-								return async ({ update }) => {
-									await update({ reset: false });
+	{#await secretsQuery}
+		<h2>Your secrets</h2>
+		<div class="muted small">Loading…</div>
+	{:then secrets}
+		<h2>Your secrets <span class="muted small">({secrets.length})</span></h2>
+		{#if secrets.length === 0}
+			<div class="muted small">No secrets yet. Add one above.</div>
+		{:else}
+			<ul class="rows">
+				{#each secrets as s (s.name)}
+					{@const updateForm = upsertSecret.for(s.name)}
+					{@const deleteForm = deleteSecret.for(s.name)}
+					<li>
+						<div class="row-head">
+							<code class="name">{s.name}</code>
+							<span class="muted small">updated {fmt(s.updatedAt)}</span>
+						</div>
+						<div class="row-actions">
+							<form
+								{...updateForm.enhance(async ({ submit }) => {
+									await submit();
 									editing[s.name] = '';
-								};
-							}}
-						>
-							<input type="hidden" name="name" value={s.name} />
-							<input
-								name="value"
-								type="password"
-								placeholder="new value (leave blank to cancel)"
-								autocomplete="new-password"
-								spellcheck="false"
-								bind:value={editing[s.name]}
-							/>
-							<button class="btn small" type="submit" disabled={!(editing[s.name] ?? '').length}>
-								Update
-							</button>
-						</form>
-						<form
-							method="POST"
-							action="?/delete"
-							use:enhance={() => {
-								return async ({ update }) => {
-									await update({ reset: false });
-								};
-							}}
-						>
-							<input type="hidden" name="name" value={s.name} />
-							<button class="btn small danger" type="submit">Delete</button>
-						</form>
-					</div>
-				</li>
-			{/each}
-		</ul>
-	{/if}
+								})}
+							>
+								<input type="hidden" name="projectId" value={projectId} />
+								<input type="hidden" name="name" value={s.name} />
+								<input
+									name="value"
+									type="password"
+									placeholder="new value (leave blank to cancel)"
+									autocomplete="new-password"
+									spellcheck="false"
+									bind:value={editing[s.name]}
+								/>
+								<button class="btn small" type="submit" disabled={!(editing[s.name] ?? '').length}>
+									Update
+								</button>
+							</form>
+							<form {...deleteForm}>
+								<input type="hidden" name="projectId" value={projectId} />
+								<input type="hidden" name="name" value={s.name} />
+								<button class="btn small danger" type="submit">Delete</button>
+							</form>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{/await}
 </div>
 
 <style>
