@@ -114,23 +114,11 @@ Do not emit partial or placeholder code. Call exactly ONE terminal tool (emit_fi
 ## Typecheck gate on emit_fixed_workflow
 The source you emit is type-checked against the Ctx interface. \`ctx.secret\` accepts only the project's current secret names (listed in the user message); a typo or unknown name is a TS error. If emit_fixed_workflow returns a tool error with TypeScript diagnostics, read them, fix the code, and call emit_fixed_workflow again.`;
 
-function previewPayload(payload: unknown, max = 200): string {
+function formatJson(value: unknown, opts: { pretty?: boolean; max?: number } = {}): string {
+	const max = opts.max ?? 4000;
 	let str: string;
 	try {
-		str = JSON.stringify(payload);
-	} catch {
-		str = String(payload);
-	}
-	if (str === undefined) {
-		str = 'undefined';
-	}
-	return truncate(str, max);
-}
-
-function prettyJson(value: unknown, max = 4000): string {
-	let str: string;
-	try {
-		str = JSON.stringify(value, null, 2);
+		str = JSON.stringify(value, null, opts.pretty ? 2 : 0);
 	} catch {
 		str = String(value);
 	}
@@ -185,7 +173,7 @@ function buildUserMessage(args: {
 	parts.push('');
 	parts.push('## Logs from that run');
 	parts.push('```json');
-	parts.push(prettyJson(args.triggeringLogs ?? [], 3000));
+	parts.push(formatJson(args.triggeringLogs ?? [], { pretty: true, max: 3000 }));
 	parts.push('```');
 	parts.push('');
 	parts.push('## Failed event payload');
@@ -194,7 +182,7 @@ function buildUserMessage(args: {
 			`event.id=${args.failedEvent.id}, triggerType=${args.failedEvent.triggerType}, receivedAt=${args.failedEvent.receivedAt}`
 		);
 		parts.push('```json');
-		parts.push(prettyJson(args.failedEvent.payload, 3000));
+		parts.push(formatJson(args.failedEvent.payload, { pretty: true, max: 3000 }));
 		parts.push('```');
 	} else {
 		parts.push('(event not found)');
@@ -236,7 +224,7 @@ function makeListEventsTool(workflowId: string): Tool {
 			const slice = all.slice(-Math.max(1, Math.floor(limit)));
 			const out = slice.map((e) => ({
 				id: e.id,
-				payloadPreview: previewPayload(e.payload, 200),
+				payloadPreview: formatJson(e.payload, { max: 200 }),
 				receivedAt: e.receivedAt,
 				triggerType: e.triggerType
 			}));
