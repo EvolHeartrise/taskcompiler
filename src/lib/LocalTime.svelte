@@ -41,5 +41,11 @@
 <style>
 	.local-time {
 		font-variant-numeric: tabular-nums;
+		/* Reserve width for the widest expected label (e.g.
+		   "2026-04-24, 3:01:29 p.m." ~ 24 chars). Pre-mount we render a
+		   slightly shorter UTC label; the min-width keeps the box identical
+		   so hydration doesn't shift surrounding content. */
+		display: inline-block;
+		min-width: 22ch;
 	}
 </style>
