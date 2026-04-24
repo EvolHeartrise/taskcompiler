@@ -19,13 +19,24 @@ export interface CreateProjectInput {
 export async function createProject(db: D1Database, input: CreateProjectInput): Promise<Project> {
 	const id = input.id ?? uuid();
 	const ts = now();
-	await db
-		.prepare(
-			`INSERT INTO projects (id, user_id, name, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?)`
-		)
-		.bind(id, input.userId, input.name, ts, ts)
-		.run();
+	// Creator is recorded both on `projects.user_id` (attribution) and as an
+	// owner-role row in `project_members` (the access-check edge). Wrap both
+	// in a D1 batch so a partial insert can never strand a project without a
+	// membership row — that would lock the creator out of their own project.
+	await db.batch([
+		db
+			.prepare(
+				`INSERT INTO projects (id, user_id, name, created_at, updated_at)
+				 VALUES (?, ?, ?, ?, ?)`
+			)
+			.bind(id, input.userId, input.name, ts, ts),
+		db
+			.prepare(
+				`INSERT INTO project_members (project_id, user_id, role, created_at)
+				 VALUES (?, ?, 'owner', ?)`
+			)
+			.bind(id, input.userId, ts)
+	]);
 	return {
 		createdAt: ts,
 		id,
@@ -37,7 +48,14 @@ export async function createProject(db: D1Database, input: CreateProjectInput): 
 
 export async function listProjectsForUser(db: D1Database, userId: string): Promise<Project[]> {
 	return fetchAll<ProjectRow, Project>(
-		db.prepare(`SELECT * FROM projects WHERE user_id = ? ORDER BY created_at ASC`).bind(userId)
+		db
+			.prepare(
+				`SELECT p.* FROM projects p
+				 JOIN project_members m ON m.project_id = p.id
+				 WHERE m.user_id = ?
+				 ORDER BY p.created_at ASC`
+			)
+			.bind(userId)
 	);
 }
 
@@ -47,11 +65,17 @@ export async function getProjectForUser(
 	userId: string
 ): Promise<Project | null> {
 	return fetchOne<ProjectRow, Project>(
-		db.prepare(`SELECT * FROM projects WHERE id = ? AND user_id = ?`).bind(id, userId)
+		db
+			.prepare(
+				`SELECT p.* FROM projects p
+				 JOIN project_members m ON m.project_id = p.id
+				 WHERE p.id = ? AND m.user_id = ?`
+			)
+			.bind(id, userId)
 	);
 }
 
-// System-level lookup — does not enforce user_id. Prefer
+// System-level lookup — does not enforce membership. Prefer
 // `getProjectForUser` in UI code.
 export async function getProject(db: D1Database, id: string): Promise<Project | null> {
 	return fetchOne<ProjectRow, Project>(db.prepare(`SELECT * FROM projects WHERE id = ?`).bind(id));
@@ -64,8 +88,17 @@ export async function renameProject(
 	name: string
 ): Promise<Project | null> {
 	const ts = now();
+	// Gate the UPDATE on membership instead of `projects.user_id` so any
+	// member of the project can rename it.
 	const res = await db
-		.prepare(`UPDATE projects SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?`)
+		.prepare(
+			`UPDATE projects SET name = ?, updated_at = ?
+			 WHERE id = ?
+			 AND EXISTS (
+			   SELECT 1 FROM project_members
+			   WHERE project_id = projects.id AND user_id = ?
+			 )`
+		)
 		.bind(name, ts, id, userId)
 		.run();
 	if ((res.meta?.changes ?? 0) === 0) {
