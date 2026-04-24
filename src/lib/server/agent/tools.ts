@@ -40,13 +40,10 @@ export async function runToolCall(
 
 	try {
 		const output = await tool.run(parsed, ctx);
-		if (typeof output === 'string') {
-			return { ok: true, output };
-		}
-		if (output === undefined) {
-			return { ok: true, output: '' };
-		}
-		return { ok: true, output: JSON.stringify(output) };
+		return {
+			ok: true,
+			output: typeof output === 'string' ? output : JSON.stringify(output ?? '')
+		};
 	} catch (error) {
 		return { ok: false, error: errorMessage(error) };
 	}
