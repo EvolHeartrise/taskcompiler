@@ -8,8 +8,8 @@ import {
 } from '$lib/server/healer/orchestrator';
 import { getDb } from '$lib/server/db';
 import {
-	createHealSession,
 	finishHealSession,
+	getHealSession,
 	updateHealSessionTranscript
 } from '$lib/server/db/queries/heal-sessions';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
@@ -19,6 +19,9 @@ import type { HealTestResults, UnhealableCategory } from '$lib/server/db/types';
 export interface HealWorkflowParams {
 	workflowId: string;
 	triggeringRunId: string;
+	// Pre-created by the executor under the partial unique-index lock,
+	// so the workflow inherits the slot rather than racing for it.
+	healSessionId: string;
 }
 
 export type HealWorkflowStatus =
@@ -45,18 +48,63 @@ type AgentStepSummary =
 	| { kind: 'unhealable'; category: UnhealableCategory; reason: string }
 	| { kind: 'failed' | 'abandoned'; reason: string };
 
+// Each heal_session row claimed by the executor must reach a terminal
+// status — otherwise the partial unique index permanently blocks future
+// heals for that workflow. The outer try/catch in run() guarantees that
+// any in-process exception releases the slot; releaseStaleHealClaim in
+// the executor handles the harder case of the workflow being killed
+// before any JS runs (worker eviction, queue eviction, etc).
+const HEAL_AGENT_MAX_TURNS = 30;
+
 export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams> {
 	async run(
 		event: WorkflowEvent<HealWorkflowParams>,
 		step: WorkflowStep
 	): Promise<HealWorkflowResult> {
-		const { workflowId, triggeringRunId } = event.payload;
-		const env = this.env;
+		const { workflowId, triggeringRunId, healSessionId } = event.payload;
 
-		const healSessionId = await step.do('create-heal-session', async () => {
-			const session = await createHealSession(getDb(env), { triggeringRunId, workflowId });
-			return session.id;
-		});
+		try {
+			return await this.runInner(step, { healSessionId, triggeringRunId, workflowId });
+		} catch (error) {
+			const message = errorMessage(error);
+			console.error('[heal-flow] run() threw, releasing slot', {
+				error: message,
+				healSessionId,
+				workflowId
+			});
+			await this.releaseRunningSlot(healSessionId, message);
+			throw error;
+		}
+	}
+
+	private async releaseRunningSlot(healSessionId: string, reason: string): Promise<void> {
+		try {
+			const session = await getHealSession(getDb(this.env), healSessionId);
+			if (!session || session.status !== 'running') {
+				return;
+			}
+			await finishHealSession(getDb(this.env), healSessionId, {
+				agentTranscript: session.agentTranscript,
+				diff: null,
+				newVersionId: null,
+				status: 'failed',
+				testResults: null,
+				unhealableReason: `heal-flow aborted: ${reason}`
+			});
+		} catch (releaseError) {
+			console.error('[heal-flow] failed to release heal_session slot', {
+				healSessionId,
+				releaseError: errorMessage(releaseError)
+			});
+		}
+	}
+
+	private async runInner(
+		step: WorkflowStep,
+		ids: { workflowId: string; triggeringRunId: string; healSessionId: string }
+	): Promise<HealWorkflowResult> {
+		const { workflowId, triggeringRunId, healSessionId } = ids;
+		const env = this.env;
 
 		// Captured pre-heal for diff computation in failure branches.
 		const previousSourceTs = await step.do('read-current-source', async () => {
@@ -69,9 +117,14 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		// has to cross a step boundary.
 		const agentSummary = await step.do(
 			'agent-heal',
-			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
+			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '15 minutes' },
 			async (): Promise<AgentStepSummary> => {
-				const outcome = await healWorkflow({ env, triggeringRunId, workflowId });
+				const outcome = await healWorkflow({
+					env,
+					maxTurns: HEAL_AGENT_MAX_TURNS,
+					triggeringRunId,
+					workflowId
+				});
 				const transcript = agentEventsToTranscript(outcome.agentTranscript);
 
 				if (outcome.kind === 'fixed') {

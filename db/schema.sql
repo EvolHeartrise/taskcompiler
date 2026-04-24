@@ -159,6 +159,13 @@ CREATE TABLE heal_sessions (
   resolved_at INTEGER
 );
 CREATE INDEX idx_heal_sessions_workflow ON heal_sessions(workflow_id, started_at);
+-- Strict 1-heal-per-workflow concurrency. The executor's atomic INSERT
+-- doubles as the lock: a unique-constraint violation means another heal
+-- is already running for that workflow, and the executor skips spawning.
+-- Once a session terminates (status != 'running'), the row falls out of
+-- the partial index, freeing the slot for the next heal.
+CREATE UNIQUE INDEX idx_heal_sessions_one_running_per_workflow
+  ON heal_sessions(workflow_id) WHERE status = 'running';
 
 CREATE TABLE workflow_state (
   workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,

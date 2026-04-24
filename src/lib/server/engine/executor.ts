@@ -1,8 +1,10 @@
 import { getDb } from '$lib/server/db';
 import { createEvent, getEvent } from '$lib/server/db/queries/events';
 import {
+	finishHealSession,
 	getActiveHealSession,
-	getOpenNeedsAttentionSession
+	getOpenNeedsAttentionSession,
+	tryClaimHealSession
 } from '$lib/server/db/queries/heal-sessions';
 import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
@@ -56,6 +58,13 @@ export interface ExecuteExistingForWorkflowOptions {
 const DISPATCH_MAX_ATTEMPTS = 4;
 const DISPATCH_BASE_DELAY_MS = 200;
 
+// A heal_session row is considered stale (and recoverable) if it has been
+// `running` for longer than this. The longest legitimate heal pipeline is
+// agent (15m) + sweep (10m) + deploy (5m) ≈ 30m of step time, plus retries
+// and queue scheduling. STALE_HEAL_AGE_MS sits well above that, so a stale
+// row almost certainly means the workflow died without finalizing.
+const STALE_HEAL_AGE_MS = 60 * 60 * 1000;
+
 const chains = new Map<string, Promise<unknown>>();
 
 function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
@@ -96,6 +105,57 @@ async function retryWithBackoff<T>(
 		}
 	}
 	return last;
+}
+
+// Try once, then on conflict force-recover any stale running row and try
+// again. The stale path covers the worst-case "workflow died before any JS
+// ran" — the in-process try/catch in heal-flow handles every other path.
+async function claimHealSlotWithStaleRecovery(
+	db: D1Database,
+	input: { workflowId: string; triggeringRunId: string }
+) {
+	const first = await tryClaimHealSession(db, input);
+	if (first) {
+		return first;
+	}
+	const existing = await getActiveHealSession(db, input.workflowId);
+	if (!existing) {
+		// Lost the race to another claim that hasn't been observed yet — the
+		// other heal is in-flight, so don't claim.
+		return null;
+	}
+	const age = Date.now() - existing.startedAt;
+	if (age < STALE_HEAL_AGE_MS) {
+		return null;
+	}
+	console.warn(
+		`[heal] reclaiming stale slot ${existing.id} (age=${Math.round(age / 1000)}s) for workflow=${input.workflowId}`
+	);
+	await releaseHealClaim(
+		db,
+		existing.id,
+		`stale: no terminal status after ${Math.round(age / 60000)} minutes`
+	);
+	return tryClaimHealSession(db, input);
+}
+
+async function releaseHealClaim(
+	db: D1Database,
+	healSessionId: string,
+	reason: string
+): Promise<void> {
+	try {
+		await finishHealSession(db, healSessionId, {
+			agentTranscript: null,
+			diff: null,
+			newVersionId: null,
+			status: 'failed',
+			testResults: null,
+			unhealableReason: `release: ${reason}`
+		});
+	} catch (releaseError) {
+		console.error(`[heal] failed to release claimed slot ${healSessionId}`, releaseError);
+	}
 }
 
 async function dispatchWithRetry(
@@ -283,25 +343,35 @@ export async function executeExistingEventForWorkflow(
 				status: 'failed' as const
 			};
 		}
-		// Dedup: at most one in-flight heal per workflow. Small race window
-		// (two simultaneous failures can both spawn) bounds waste to ~2×.
-		// Missed failures are replayed by the winning heal's post-deploy sweep.
-		const activeHeal = await getActiveHealSession(db, workflow.id);
-		if (activeHeal) {
+		// Strict dedup: claim the heal slot via an atomic INSERT against the
+		// partial unique index `idx_heal_sessions_one_running_per_workflow`
+		// (status='running'). If another failure raced us to the slot, the
+		// INSERT returns null and we skip spawning. The slot is freed when
+		// the heal finalizes the row to a terminal status (heal-flow's
+		// catch-all also finalizes on unexpected failure, so a dead heal
+		// can't permanently block future ones).
+		const claimed = await claimHealSlotWithStaleRecovery(db, {
+			triggeringRunId: run.id,
+			workflowId: workflow.id
+		});
+		if (!claimed) {
 			console.log(
-				`[heal] skipping create for runId=${run.id}: active session already running (sessionId=${activeHeal.id})`
+				`[heal] skipping create for runId=${run.id}: another heal already claimed the slot for workflow=${workflow.id}`
 			);
 		} else {
 			try {
 				await env.HEAL_WORKFLOW.create({
-					id: `heal-${run.id}`,
+					id: `heal-${claimed.id}`,
 					params: {
+						healSessionId: claimed.id,
 						triggeringRunId: run.id,
 						workflowId: workflow.id
 					}
 				});
 			} catch (error) {
 				console.error(`failed to start HEAL_WORKFLOW for runId=${run.id}`, error);
+				// Release the claimed slot so future failures can heal.
+				await releaseHealClaim(db, claimed.id, errorMessage(error));
 			}
 		}
 		return {
