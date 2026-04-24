@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { fetchAll, fetchOne } from '../mappers.ts';
 import type { EventSource, TriggerType } from '../types.ts';
 
 interface EventSourceRow {
@@ -48,41 +48,38 @@ export async function createEventSource(input: CreateEventSourceInput): Promise<
 // System-level lookup (cron/webhook/executor). Does not enforce project_id —
 // Callers already trust the id. Prefer `getEventSourceForProject` in UI code paths.
 export async function getEventSource(id: string): Promise<EventSource | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM event_sources WHERE id = ?`)
-		.bind(id)
-		.first<EventSourceRow>();
-	return row ? mapRow<EventSource>(row) : null;
+	return fetchOne<EventSourceRow, EventSource>(
+		getDb().prepare(`SELECT * FROM event_sources WHERE id = ?`).bind(id)
+	);
 }
 
 export async function getEventSourceForProject(
 	id: string,
 	projectId: string
 ): Promise<EventSource | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM event_sources WHERE id = ? AND project_id = ?`)
-		.bind(id, projectId)
-		.first<EventSourceRow>();
-	return row ? mapRow<EventSource>(row) : null;
+	return fetchOne<EventSourceRow, EventSource>(
+		getDb()
+			.prepare(`SELECT * FROM event_sources WHERE id = ? AND project_id = ?`)
+			.bind(id, projectId)
+	);
 }
 
 export async function listEventSourcesForProject(projectId: string): Promise<EventSource[]> {
-	const res = await getDb()
-		.prepare(`SELECT * FROM event_sources WHERE project_id = ? ORDER BY created_at DESC`)
-		.bind(projectId)
-		.all<EventSourceRow>();
-	return res.results.map((r) => mapRow<EventSource>(r));
+	return fetchAll<EventSourceRow, EventSource>(
+		getDb()
+			.prepare(`SELECT * FROM event_sources WHERE project_id = ? ORDER BY created_at DESC`)
+			.bind(projectId)
+	);
 }
 
 export async function listCronEventSources(): Promise<EventSource[]> {
-	const res = await getDb()
-		.prepare(
+	return fetchAll<EventSourceRow, EventSource>(
+		getDb().prepare(
 			`SELECT * FROM event_sources
 			 WHERE trigger_type = 'cron' AND cron_expr IS NOT NULL
 			 ORDER BY last_fired_at ASC`
 		)
-		.all<EventSourceRow>();
-	return res.results.map((r) => mapRow<EventSource>(r));
+	);
 }
 
 export async function markEventSourceFired(sourceId: string, ts: number): Promise<void> {

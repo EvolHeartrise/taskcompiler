@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { fetchAll, fetchOne } from '../mappers.ts';
 import type { VersionCreatedBy, WorkflowVersion } from '../types.ts';
 
 interface WorkflowVersionRow {
@@ -80,29 +80,27 @@ export async function createVersion(input: CreateVersionInput): Promise<Workflow
 }
 
 export async function getVersion(id: string): Promise<WorkflowVersion | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM workflow_versions WHERE id = ?`)
-		.bind(id)
-		.first<WorkflowVersionRow>();
-	return row ? mapRow<WorkflowVersion>(row) : null;
+	return fetchOne<WorkflowVersionRow, WorkflowVersion>(
+		getDb().prepare(`SELECT * FROM workflow_versions WHERE id = ?`).bind(id)
+	);
 }
 
 export async function getCurrentVersion(workflowId: string): Promise<WorkflowVersion | null> {
-	const row = await getDb()
-		.prepare(
-			`SELECT v.* FROM workflow_versions v
-			 JOIN workflows w ON w.current_version_id = v.id
-			 WHERE w.id = ?`
-		)
-		.bind(workflowId)
-		.first<WorkflowVersionRow>();
-	return row ? mapRow<WorkflowVersion>(row) : null;
+	return fetchOne<WorkflowVersionRow, WorkflowVersion>(
+		getDb()
+			.prepare(
+				`SELECT v.* FROM workflow_versions v
+				 JOIN workflows w ON w.current_version_id = v.id
+				 WHERE w.id = ?`
+			)
+			.bind(workflowId)
+	);
 }
 
 export async function listVersions(workflowId: string): Promise<WorkflowVersion[]> {
-	const res = await getDb()
-		.prepare(`SELECT * FROM workflow_versions WHERE workflow_id = ? ORDER BY version ASC`)
-		.bind(workflowId)
-		.all<WorkflowVersionRow>();
-	return res.results.map((r) => mapRow<WorkflowVersion>(r));
+	return fetchAll<WorkflowVersionRow, WorkflowVersion>(
+		getDb()
+			.prepare(`SELECT * FROM workflow_versions WHERE workflow_id = ? ORDER BY version ASC`)
+			.bind(workflowId)
+	);
 }

@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { fetchAll, fetchOne } from '../mappers.ts';
 import type { Project } from '../types.ts';
 
 interface ProjectRow {
@@ -36,29 +36,23 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
 }
 
 export async function listProjectsForUser(userId: string): Promise<Project[]> {
-	const res = await getDb()
-		.prepare(`SELECT * FROM projects WHERE user_id = ? ORDER BY created_at ASC`)
-		.bind(userId)
-		.all<ProjectRow>();
-	return res.results.map((r) => mapRow<Project>(r));
+	return fetchAll<ProjectRow, Project>(
+		getDb().prepare(`SELECT * FROM projects WHERE user_id = ? ORDER BY created_at ASC`).bind(userId)
+	);
 }
 
 export async function getProjectForUser(id: string, userId: string): Promise<Project | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM projects WHERE id = ? AND user_id = ?`)
-		.bind(id, userId)
-		.first<ProjectRow>();
-	return row ? mapRow<Project>(row) : null;
+	return fetchOne<ProjectRow, Project>(
+		getDb().prepare(`SELECT * FROM projects WHERE id = ? AND user_id = ?`).bind(id, userId)
+	);
 }
 
 // System-level lookup. Used by ctx-rendering paths (e.g. WFP binding) where
 // The workflow id is already trusted. Prefer `getProjectForUser` in UI code.
 export async function getProject(id: string): Promise<Project | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM projects WHERE id = ?`)
-		.bind(id)
-		.first<ProjectRow>();
-	return row ? mapRow<Project>(row) : null;
+	return fetchOne<ProjectRow, Project>(
+		getDb().prepare(`SELECT * FROM projects WHERE id = ?`).bind(id)
+	);
 }
 
 export async function renameProject(

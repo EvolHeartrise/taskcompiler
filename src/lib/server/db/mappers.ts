@@ -1,3 +1,19 @@
+// Run a single-row D1 query and map the result to its camelCase domain
+// shape, or null if no row matched. Saves the boilerplate `row ? mapRow(row) : null`
+// at every single-row lookup site.
+export async function fetchOne<R extends object, D>(stmt: D1PreparedStatement): Promise<D | null> {
+	const row = await stmt.first<R>();
+	return row ? mapRow<D>(row) : null;
+}
+
+// Run a multi-row D1 query and map each result to its camelCase domain
+// shape. Saves the boilerplate `res.results.map((r) => mapRow(r))` at every
+// list lookup site.
+export async function fetchAll<R extends object, D>(stmt: D1PreparedStatement): Promise<D[]> {
+	const res = await stmt.all<R>();
+	return res.results.map((r) => mapRow<D>(r));
+}
+
 // Convert a snake_case row from D1 to its camelCase domain shape. Pass
 // `skip` to exclude columns the caller will layer on top (JSON-decoded or
 // boolean-coerced fields); the returned object is cast to the caller's
