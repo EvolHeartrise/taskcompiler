@@ -188,6 +188,13 @@
 {/if}
 
 <style>
+	/* Reserve space for the vertical scrollbar regardless of content height
+	   so the centered .container doesn't shift horizontally when switching
+	   tabs (Events is tall → scrollbar appears; Code/Healings empty → no
+	   scrollbar → viewport widens ~15px → centered content jumps). */
+	:global(html) {
+		scrollbar-gutter: stable;
+	}
 	:global(html, body) {
 		margin: 0;
 		padding: 0;

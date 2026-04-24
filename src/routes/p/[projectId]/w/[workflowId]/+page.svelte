@@ -265,15 +265,11 @@
 			)}
 		>
 			{t.label}
-			{#if t.id === 'events'}
-				<span class="tab-count" class:tab-count-hidden={data.stats.totalFailed === 0}
-					>{data.stats.totalFailed || 0}</span
-				>
+			{#if t.id === 'events' && data.stats.totalFailed > 0}
+				<span class="tab-count">{data.stats.totalFailed}</span>
 			{/if}
-			{#if t.id === 'healings'}
-				<span class="tab-count" class:tab-count-hidden={data.stats.totalHeals === 0}
-					>{data.stats.totalHeals || 0}</span
-				>
+			{#if t.id === 'healings' && data.stats.totalHeals > 0}
+				<span class="tab-count">{data.stats.totalHeals}</span>
 			{/if}
 		</a>
 	{/each}
@@ -313,147 +309,520 @@
 	</div>
 {/if}
 
-{#if activeTab === 'overview'}
-	{#if genInFlight}
-		<div class="banner banner-info">
-			<strong>Generating workflow…</strong>
-			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
-		</div>
-	{:else if inFlight.gen?.status === 'errored'}
-		<div class="banner banner-error">
-			<strong>Generation failed</strong>
-			{#if inFlight.gen.error}
-				<span class="muted small">{inFlight.gen.error.name}: {inFlight.gen.error.message}</span>
+<!-- Single wrapper around all four tab panels. The min-height keeps the page
+     tall even when a tab body is short, so the vertical scrollbar (already
+     reserved via scrollbar-gutter on <html>) stays present and the centered
+     .container can't shift horizontally between tab switches. -->
+<div class="tab-panel">
+	{#if activeTab === 'overview'}
+		{#if genInFlight}
+			<div class="banner banner-info">
+				<strong>Generating workflow…</strong>
+				<span class="muted small">This page auto-refreshes every 3 seconds.</span>
+			</div>
+		{:else if inFlight.gen?.status === 'errored'}
+			<div class="banner banner-error">
+				<strong>Generation failed</strong>
+				{#if inFlight.gen.error}
+					<span class="muted small">{inFlight.gen.error.name}: {inFlight.gen.error.message}</span>
+				{/if}
+			</div>
+		{/if}
+		{#if healInFlight}
+			<div class="banner banner-info">
+				<strong>Healing in progress…</strong>
+				<span class="muted small">This page auto-refreshes every 3 seconds.</span>
+			</div>
+		{/if}
+		{#if data.workflow.prompt}
+			<section class="prompt-section">
+				<div class="card prompt-card">
+					<h2>Original prompt</h2>
+					<pre class="prompt-text">{data.workflow.prompt}</pre>
+				</div>
+			</section>
+		{/if}
+		<section class="grid">
+			<div class="card stats">
+				<div class="stat">
+					<div class="k">Events</div>
+					<div class="v">{data.stats.totalEvents}</div>
+				</div>
+				<div class="stat">
+					<div class="k">Runs</div>
+					<div class="v">{data.stats.totalRuns}</div>
+				</div>
+				<div class="stat">
+					<div class="k">Failed runs</div>
+					<div class="v" class:danger={data.stats.totalFailed > 0}>{data.stats.totalFailed}</div>
+				</div>
+				<div class="stat">
+					<div class="k">Heal sessions</div>
+					<div class="v">{data.stats.totalHeals}</div>
+				</div>
+			</div>
+
+			{#if data.eventSource.triggerType === 'webhook'}
+				<div class="card">
+					<h2>Event source — webhook URL</h2>
+					<div class="webhook-row">
+						<code class="webhook">{webhookUrl}</code>
+						<button type="button" class="btn small" onclick={copyWebhook}>
+							{copied ? 'Copied ✓' : 'Copy'}
+						</button>
+					</div>
+					<p class="muted small">
+						Every request to this URL fans out to this workflow and any siblings attached to
+						<a
+							href={resolve('/p/[projectId]/s/[sourceId]', {
+								projectId,
+								sourceId: data.eventSource.id
+							})}>{data.eventSource.name}</a
+						>.
+					</p>
+				</div>
+			{:else}
+				<div class="card">
+					<h2>Event source — schedule</h2>
+					<div class="webhook-row">
+						<code class="webhook">{data.eventSource.cronExpr ?? '—'}</code>
+					</div>
+					<p class="muted small">
+						Fires on this schedule (UTC); every tick fans out to this workflow and any siblings on
+						<a
+							href={resolve('/p/[projectId]/s/[sourceId]', {
+								projectId,
+								sourceId: data.eventSource.id
+							})}>{data.eventSource.name}</a
+						>. Use Manual trigger to test ad-hoc.
+					</p>
+				</div>
 			{/if}
-		</div>
-	{/if}
-	{#if healInFlight}
-		<div class="banner banner-info">
-			<strong>Healing in progress…</strong>
-			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
-		</div>
-	{/if}
-	{#if data.workflow.prompt}
-		<section class="prompt-section">
-			<div class="card prompt-card">
-				<h2>Original prompt</h2>
-				<pre class="prompt-text">{data.workflow.prompt}</pre>
+
+			<div class="card">
+				<h2>Manual trigger</h2>
+				<form
+					onsubmit={(e) => {
+						e.preventDefault();
+						void runTrigger();
+					}}
+				>
+					<label class="field">
+						<span>Payload (JSON)</span>
+						<textarea name="payload" rows="5" bind:value={triggerPayload}></textarea>
+					</label>
+					<button class="btn primary" type="submit">Trigger</button>
+				</form>
+				{#if triggerResult}
+					{#if triggerResult.ok}
+						<div
+							class="result"
+							class:ok={triggerResult.status === 'ok'}
+							class:failed={triggerResult.status === 'failed'}
+						>
+							<div><strong>status:</strong> {triggerResult.status}</div>
+							<div><strong>eventId:</strong> <span class="mono">{triggerResult.eventId}</span></div>
+							<div><strong>runId:</strong> <span class="mono">{triggerResult.runId}</span></div>
+							{#if triggerResult.result !== null && triggerResult.result !== undefined}
+								<details>
+									<summary>result</summary>
+									<pre>{safeJson(triggerResult.result)}</pre>
+								</details>
+							{/if}
+							{#if triggerResult.error}
+								<details open>
+									<summary>error</summary>
+									<pre>{safeJson(triggerResult.error)}</pre>
+								</details>
+							{/if}
+						</div>
+					{:else}
+						<div class="alert">{triggerResult.error}</div>
+					{/if}
+				{/if}
+			</div>
+		</section>
+
+		<section class="danger-zone">
+			<div class="danger-row">
+				<div>
+					<div class="danger-title">Delete this workflow</div>
+					<div class="muted small">
+						Removes every version, deployed worker script, event, run, and heal session.
+					</div>
+				</div>
+				<button type="button" class="btn danger" onclick={openDeleteDialog}>Delete workflow</button>
 			</div>
 		</section>
 	{/if}
-	<section class="grid">
-		<div class="card stats">
-			<div class="stat">
-				<div class="k">Events</div>
-				<div class="v">{data.stats.totalEvents}</div>
-			</div>
-			<div class="stat">
-				<div class="k">Runs</div>
-				<div class="v">{data.stats.totalRuns}</div>
-			</div>
-			<div class="stat">
-				<div class="k">Failed runs</div>
-				<div class="v" class:danger={data.stats.totalFailed > 0}>{data.stats.totalFailed}</div>
-			</div>
-			<div class="stat">
-				<div class="k">Heal sessions</div>
-				<div class="v">{data.stats.totalHeals}</div>
-			</div>
-		</div>
 
-		{#if data.eventSource.triggerType === 'webhook'}
+	{#if activeTab === 'events'}
+		<section>
 			<div class="card">
-				<h2>Event source — webhook URL</h2>
-				<div class="webhook-row">
-					<code class="webhook">{webhookUrl}</code>
-					<button type="button" class="btn small" onclick={copyWebhook}>
-						{copied ? 'Copied ✓' : 'Copy'}
-					</button>
-				</div>
-				<p class="muted small">
-					Every request to this URL fans out to this workflow and any siblings attached to
-					<a
-						href={resolve('/p/[projectId]/s/[sourceId]', {
-							projectId,
-							sourceId: data.eventSource.id
-						})}>{data.eventSource.name}</a
-					>.
-				</p>
-			</div>
-		{:else}
-			<div class="card">
-				<h2>Event source — schedule</h2>
-				<div class="webhook-row">
-					<code class="webhook">{data.eventSource.cronExpr ?? '—'}</code>
-				</div>
-				<p class="muted small">
-					Fires on this schedule (UTC); every tick fans out to this workflow and any siblings on
-					<a
-						href={resolve('/p/[projectId]/s/[sourceId]', {
-							projectId,
-							sourceId: data.eventSource.id
-						})}>{data.eventSource.name}</a
-					>. Use Manual trigger to test ad-hoc.
-				</p>
-			</div>
-		{/if}
-
-		<div class="card">
-			<h2>Manual trigger</h2>
-			<form
-				onsubmit={(e) => {
-					e.preventDefault();
-					void runTrigger();
-				}}
-			>
-				<label class="field">
-					<span>Payload (JSON)</span>
-					<textarea name="payload" rows="5" bind:value={triggerPayload}></textarea>
-				</label>
-				<button class="btn primary" type="submit">Trigger</button>
-			</form>
-			{#if triggerResult}
-				{#if triggerResult.ok}
-					<div
-						class="result"
-						class:ok={triggerResult.status === 'ok'}
-						class:failed={triggerResult.status === 'failed'}
-					>
-						<div><strong>status:</strong> {triggerResult.status}</div>
-						<div><strong>eventId:</strong> <span class="mono">{triggerResult.eventId}</span></div>
-						<div><strong>runId:</strong> <span class="mono">{triggerResult.runId}</span></div>
-						{#if triggerResult.result !== null && triggerResult.result !== undefined}
-							<details>
-								<summary>result</summary>
-								<pre>{safeJson(triggerResult.result)}</pre>
-							</details>
+				<div class="events-head">
+					<div class="stat-chips">
+						<span class="stat-chip">
+							<span class="label">Total</span>
+							<span class="val">{eventStatusCounts.total}</span>
+						</span>
+						<span class="stat-chip ok">
+							<span class="label">OK</span>
+							<span class="val">{eventStatusCounts.ok}</span>
+						</span>
+						<span class="stat-chip failed">
+							<span class="label">Failed</span>
+							<span class="val">{eventStatusCounts.failed}</span>
+						</span>
+						<span class="stat-chip running">
+							<span class="label">Running</span>
+							<span class="val">{eventStatusCounts.running}</span>
+						</span>
+						<span class="stat-chip none">
+							<span class="label">No run</span>
+							<span class="val">{eventStatusCounts.none}</span>
+						</span>
+						{#if eventStatusCounts.healing > 0}
+							<span class="stat-chip">
+								<span class="label">Healing</span>
+								<span class="val">{eventStatusCounts.healing}</span>
+							</span>
 						{/if}
-						{#if triggerResult.error}
-							<details open>
-								<summary>error</summary>
-								<pre>{safeJson(triggerResult.error)}</pre>
-							</details>
+					</div>
+					<div class="filter-bar">
+						{#each [{ id: 'all', label: 'All' }, { id: 'ok', label: 'OK' }, { id: 'failed', label: 'Failed' }, { id: 'running', label: 'Running' }, { id: 'none', label: 'No run' }] as f (f.id)}
+							<button
+								type="button"
+								class="filter-btn"
+								class:active={eventFilter === f.id}
+								onclick={() => (eventFilter = f.id as EventFilter)}
+							>
+								{f.label}
+							</button>
+						{/each}
+					</div>
+				</div>
+
+				{#if data.events.length === 0}
+					<div class="muted small">No events yet. Fire the webhook or use Manual trigger.</div>
+				{:else if filteredEvents.length === 0}
+					<div class="muted small">No events match this filter.</div>
+				{:else}
+					<ul class="rows">
+						{#each filteredEvents as ev (ev.id)}
+							{@const evRuns = runsForEvent(ev.id)}
+							{@const latest = latestRunForEvent(ev.id)}
+							{@const status = eventStatus(ev.id)}
+							{@const heal = healForEvent(ev.id)}
+							<li>
+								<button class="row-btn" type="button" onclick={() => toggle(expandedEvents, ev.id)}>
+									<div class="row-head">
+										<span class="mono">{shortId(ev.id)}</span>
+										<span class="chip small">{ev.triggerType}</span>
+										{#if status === 'none'}
+											<span class="badge superseded">no run</span>
+										{:else}
+											<span class="badge {status}">{status}</span>
+										{/if}
+										{#if heal}
+											<span class="chip small">heal {heal.status}</span>
+										{/if}
+										<span class="row-spacer"></span>
+										<span class="muted small"><LocalTime ms={ev.receivedAt} /></span>
+									</div>
+									<div class="row-body">
+										{#if status === 'failed' && latest?.error}
+											<strong>{latest.error.name}</strong>:
+											<span class="muted">{truncate(latest.error.message, 160)}</span>
+										{:else if status === 'ok' && latest?.result !== null && latest?.result !== undefined}
+											<code class="preview">{truncate(safeJson(latest.result), 160)}</code>
+										{:else if status === 'none'}
+											<span class="muted small">awaiting run</span>
+										{:else}
+											<code class="preview">{truncate(safeJson(ev.payload), 160)}</code>
+										{/if}
+									</div>
+								</button>
+								{#if expandedEvents[ev.id]}
+									<div class="details">
+										<div class="kv"><span>event id</span><code>{ev.id}</code></div>
+										{#if ev.dedupKey}
+											<div class="kv"><span>dedup key</span><code>{ev.dedupKey}</code></div>
+										{/if}
+
+										<div class="block">
+											<div class="label">payload</div>
+											<pre>{safeJson(ev.payload)}</pre>
+										</div>
+
+										<div class="block">
+											<div class="label">runs ({evRuns.length})</div>
+											{#if evRuns.length === 0}
+												<div class="muted small">No runs yet for this event.</div>
+											{:else}
+												<ul class="inner-rows">
+													{#each evRuns as r (r.id)}
+														<li>
+															<div class="row-head">
+																<span class="mono">{shortId(r.id)}</span>
+																<span class="badge {r.status}">{r.status}</span>
+																<span class="muted small"
+																	>· {duration(r.startedAt, r.finishedAt)}</span
+																>
+																<span class="muted small">· <LocalTime ms={r.startedAt} /></span>
+																{#if r.isReplay}<span class="chip small">replay</span>{/if}
+															</div>
+															<div class="inner-kv">
+																<div class="kv"><span>run id</span><code>{r.id}</code></div>
+																<div class="kv">
+																	<span>version id</span><code>{r.versionId}</code>
+																</div>
+																{#if r.parentRunId}
+																	<div class="kv">
+																		<span>parent run</span><code>{r.parentRunId}</code>
+																	</div>
+																{/if}
+																{#if r.result !== null && r.result !== undefined}
+																	<div class="block">
+																		<div class="label">result</div>
+																		<pre>{safeJson(r.result)}</pre>
+																	</div>
+																{/if}
+																{#if r.error}
+																	<div class="block">
+																		<div class="label">error</div>
+																		<pre>{r.error.name}: {r.error.message}
+{r.error.stack ?? ''}</pre>
+																	</div>
+																{/if}
+																{#if r.logs && r.logs.length > 0}
+																	<div class="block">
+																		<div class="label">logs</div>
+																		<pre>{r.logs
+																				.map(
+																					(l) =>
+																						`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
+																				)
+																				.join('\n')}</pre>
+																	</div>
+																{/if}
+															</div>
+														</li>
+													{/each}
+												</ul>
+											{/if}
+										</div>
+
+										{#if heal}
+											<div class="block">
+												<div class="label">heal session</div>
+												<div class="kv">
+													<span>id</span>
+													<a
+														href={resolve(
+															`/p/[projectId]/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+															{ projectId, workflowId: data.workflow.id }
+														)}><code>{heal.id}</code></a
+													>
+													<span class="badge {heal.status}">{heal.status}</span>
+												</div>
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+		</section>
+	{/if}
+
+	{#if activeTab === 'healings'}
+		<section>
+			<div class="card">
+				<h2>Heal sessions <span class="muted small">({data.heals.length})</span></h2>
+				{#if data.heals.length === 0}
+					<div class="muted small">No healings yet.</div>
+				{:else}
+					<ul class="rows">
+						{#each data.heals as h (h.id)}
+							<li>
+								<button class="row-btn" type="button" onclick={() => toggle(expandedHeals, h.id)}>
+									<div class="row-head">
+										<span class="mono">{shortId(h.id)}</span>
+										<span class="badge {h.status}">{h.status}</span>
+										<span class="muted small">started <LocalTime ms={h.startedAt} /></span>
+										<span class="muted small">· finished <LocalTime ms={h.finishedAt} /></span>
+									</div>
+									<div class="row-body muted small">
+										triggered by run {shortId(h.triggeringRunId)}
+										{#if h.testResults}
+											· tests {h.testResults.passed}/{h.testResults.total}
+										{/if}
+										{#if h.newVersionId}
+											· new version
+										{/if}
+										{#if h.status === 'needs_attention' && h.unhealableCategory}
+											· <span class="chip small">{unhealableLabel(h.unhealableCategory)}</span>
+										{/if}
+									</div>
+								</button>
+								{#if expandedHeals[h.id]}
+									<div class="details">
+										<div class="kv"><span>id</span><code>{h.id}</code></div>
+										<div class="kv">
+											<span>triggering run</span><code>{h.triggeringRunId}</code>
+										</div>
+										{#if h.newVersionId}
+											<div class="kv">
+												<span>new version</span>
+												<a
+													href={resolve(
+														`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: h.newVersionId })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+														{ projectId, workflowId: data.workflow.id }
+													)}><code>{h.newVersionId}</code></a
+												>
+											</div>
+										{/if}
+										{#if h.diff}
+											<div class="block">
+												<div class="label">diff</div>
+												<pre>{h.diff}</pre>
+											</div>
+										{/if}
+										{#if h.testResults}
+											<div class="block">
+												<div class="label">
+													test results ({h.testResults.passed}/{h.testResults.total})
+												</div>
+												<table class="inner">
+													<thead>
+														<tr><th>event</th><th>ok</th><th>error</th></tr>
+													</thead>
+													<tbody>
+														{#each h.testResults.details as d (d.eventId)}
+															<tr>
+																<td class="mono">{shortId(d.eventId)}</td>
+																<td>
+																	{#if d.ok}
+																		<span class="badge ok">ok</span>
+																	{:else}
+																		<span class="badge failed">fail</span>
+																	{/if}
+																</td>
+																<td class="muted">
+																	{#if d.error}
+																		{d.error.name}: {truncate(d.error.message, 120)}
+																	{:else}—{/if}
+																</td>
+															</tr>
+														{/each}
+													</tbody>
+												</table>
+											</div>
+										{/if}
+										{#if h.agentTranscript && h.agentTranscript.length > 0}
+											<div class="block">
+												<button
+													class="disclosure"
+													type="button"
+													onclick={() => toggle(transcriptOpen, h.id)}
+												>
+													{transcriptOpen[h.id] ? '▾' : '▸'} agent transcript ({h.agentTranscript
+														.length})
+												</button>
+												{#if transcriptOpen[h.id]}
+													<ul class="transcript">
+														{#each h.agentTranscript as t, i (i)}
+															<li>
+																<div class="t-head">
+																	<span class="chip small">{t.role}</span>
+																	<span class="muted small"><LocalTime ms={t.ts} /></span>
+																</div>
+																<pre>{t.message}</pre>
+																{#if t.data !== undefined}
+																	<pre class="data">{safeJson(t.data)}</pre>
+																{/if}
+															</li>
+														{/each}
+													</ul>
+												{/if}
+											</div>
+										{/if}
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+		</section>
+	{/if}
+
+	{#if activeTab === 'code'}
+		<section>
+			<div class="card">
+				<div class="code-head">
+					<label>
+						<span>Version</span>
+						<select
+							onchange={(e) => {
+								const v = (e.currentTarget as HTMLSelectElement).value;
+								window.location.href = resolve(
+									`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: v })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+									{ projectId, workflowId: data.workflow.id }
+								);
+							}}
+						>
+							{#each data.versions as v (v.id)}
+								<option value={v.id} selected={selectedVersion?.id === v.id}>
+									v{v.version} · {v.createdBy} · {utcLabel(v.createdAt)}
+									{v.id === data.currentVersion?.id ? '(current)' : ''}
+								</option>
+							{/each}
+						</select>
+					</label>
+				</div>
+
+				{#if selectedVersion}
+					<div class="version-meta">
+						<div class="kv"><span>version</span>{selectedVersion.version}</div>
+						<div class="kv"><span>createdBy</span>{selectedVersion.createdBy}</div>
+						<div class="kv"><span>createdAt</span><LocalTime ms={selectedVersion.createdAt} /></div>
+						{#if selectedVersion.parentVersionId}
+							<div class="kv">
+								<span>parent</span>
+								<a
+									href={resolve(
+										`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: selectedVersion.parentVersionId })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+										{ projectId, workflowId: data.workflow.id }
+									)}><code>{selectedVersion.parentVersionId}</code></a
+								>
+							</div>
+						{/if}
+						{#if selectedVersion.healedFromRunId}
+							<div class="kv">
+								<span>healed from run</span>
+								<code>{selectedVersion.healedFromRunId}</code>
+							</div>
+						{/if}
+					</div>
+					<div class="code">
+						{#if data.selectedVersionSourceHtml}
+							<!-- Trusted HTML: shiki syntax-highlighter output, not user input. -->
+							<!-- eslint-disable-next-line svelte/no-at-html-tags -->
+							{@html data.selectedVersionSourceHtml}
+						{:else}
+							<pre><code>{selectedVersion.sourceTs}</code></pre>
 						{/if}
 					</div>
 				{:else}
-					<div class="alert">{triggerResult.error}</div>
+					<div class="muted small">No version available.</div>
 				{/if}
-			{/if}
-		</div>
-	</section>
-
-	<section class="danger-zone">
-		<div class="danger-row">
-			<div>
-				<div class="danger-title">Delete this workflow</div>
-				<div class="muted small">
-					Removes every version, deployed worker script, event, run, and heal session.
-				</div>
 			</div>
-			<button type="button" class="btn danger" onclick={openDeleteDialog}>Delete workflow</button>
-		</div>
-	</section>
-{/if}
+		</section>
+	{/if}
+</div>
 
 <dialog bind:this={deleteDialog} class="delete-dialog" onclose={() => (deleteConfirmName = '')}>
 	<form {...deleteWorkflow}>
@@ -483,371 +852,6 @@
 		</div>
 	</form>
 </dialog>
-
-{#if activeTab === 'events'}
-	<section>
-		<div class="card">
-			<div class="events-head">
-				<div class="stat-chips">
-					<span class="stat-chip">
-						<span class="label">Total</span>
-						<span class="val">{eventStatusCounts.total}</span>
-					</span>
-					<span class="stat-chip ok">
-						<span class="label">OK</span>
-						<span class="val">{eventStatusCounts.ok}</span>
-					</span>
-					<span class="stat-chip failed">
-						<span class="label">Failed</span>
-						<span class="val">{eventStatusCounts.failed}</span>
-					</span>
-					<span class="stat-chip running">
-						<span class="label">Running</span>
-						<span class="val">{eventStatusCounts.running}</span>
-					</span>
-					<span class="stat-chip none">
-						<span class="label">No run</span>
-						<span class="val">{eventStatusCounts.none}</span>
-					</span>
-					{#if eventStatusCounts.healing > 0}
-						<span class="stat-chip">
-							<span class="label">Healing</span>
-							<span class="val">{eventStatusCounts.healing}</span>
-						</span>
-					{/if}
-				</div>
-				<div class="filter-bar">
-					{#each [{ id: 'all', label: 'All' }, { id: 'ok', label: 'OK' }, { id: 'failed', label: 'Failed' }, { id: 'running', label: 'Running' }, { id: 'none', label: 'No run' }] as f (f.id)}
-						<button
-							type="button"
-							class="filter-btn"
-							class:active={eventFilter === f.id}
-							onclick={() => (eventFilter = f.id as EventFilter)}
-						>
-							{f.label}
-						</button>
-					{/each}
-				</div>
-			</div>
-
-			{#if data.events.length === 0}
-				<div class="muted small">No events yet. Fire the webhook or use Manual trigger.</div>
-			{:else if filteredEvents.length === 0}
-				<div class="muted small">No events match this filter.</div>
-			{:else}
-				<ul class="rows">
-					{#each filteredEvents as ev (ev.id)}
-						{@const evRuns = runsForEvent(ev.id)}
-						{@const latest = latestRunForEvent(ev.id)}
-						{@const status = eventStatus(ev.id)}
-						{@const heal = healForEvent(ev.id)}
-						<li>
-							<button class="row-btn" type="button" onclick={() => toggle(expandedEvents, ev.id)}>
-								<div class="row-head">
-									<span class="mono">{shortId(ev.id)}</span>
-									<span class="chip small">{ev.triggerType}</span>
-									{#if status === 'none'}
-										<span class="badge superseded">no run</span>
-									{:else}
-										<span class="badge {status}">{status}</span>
-									{/if}
-									{#if heal}
-										<span class="chip small">heal {heal.status}</span>
-									{/if}
-									<span class="row-spacer"></span>
-									<span class="muted small"><LocalTime ms={ev.receivedAt} /></span>
-								</div>
-								<div class="row-body">
-									{#if status === 'failed' && latest?.error}
-										<strong>{latest.error.name}</strong>:
-										<span class="muted">{truncate(latest.error.message, 160)}</span>
-									{:else if status === 'ok' && latest?.result !== null && latest?.result !== undefined}
-										<code class="preview">{truncate(safeJson(latest.result), 160)}</code>
-									{:else if status === 'none'}
-										<span class="muted small">awaiting run</span>
-									{:else}
-										<code class="preview">{truncate(safeJson(ev.payload), 160)}</code>
-									{/if}
-								</div>
-							</button>
-							{#if expandedEvents[ev.id]}
-								<div class="details">
-									<div class="kv"><span>event id</span><code>{ev.id}</code></div>
-									{#if ev.dedupKey}
-										<div class="kv"><span>dedup key</span><code>{ev.dedupKey}</code></div>
-									{/if}
-
-									<div class="block">
-										<div class="label">payload</div>
-										<pre>{safeJson(ev.payload)}</pre>
-									</div>
-
-									<div class="block">
-										<div class="label">runs ({evRuns.length})</div>
-										{#if evRuns.length === 0}
-											<div class="muted small">No runs yet for this event.</div>
-										{:else}
-											<ul class="inner-rows">
-												{#each evRuns as r (r.id)}
-													<li>
-														<div class="row-head">
-															<span class="mono">{shortId(r.id)}</span>
-															<span class="badge {r.status}">{r.status}</span>
-															<span class="muted small"
-																>· {duration(r.startedAt, r.finishedAt)}</span
-															>
-															<span class="muted small">· <LocalTime ms={r.startedAt} /></span>
-															{#if r.isReplay}<span class="chip small">replay</span>{/if}
-														</div>
-														<div class="inner-kv">
-															<div class="kv"><span>run id</span><code>{r.id}</code></div>
-															<div class="kv">
-																<span>version id</span><code>{r.versionId}</code>
-															</div>
-															{#if r.parentRunId}
-																<div class="kv">
-																	<span>parent run</span><code>{r.parentRunId}</code>
-																</div>
-															{/if}
-															{#if r.result !== null && r.result !== undefined}
-																<div class="block">
-																	<div class="label">result</div>
-																	<pre>{safeJson(r.result)}</pre>
-																</div>
-															{/if}
-															{#if r.error}
-																<div class="block">
-																	<div class="label">error</div>
-																	<pre>{r.error.name}: {r.error.message}
-{r.error.stack ?? ''}</pre>
-																</div>
-															{/if}
-															{#if r.logs && r.logs.length > 0}
-																<div class="block">
-																	<div class="label">logs</div>
-																	<pre>{r.logs
-																			.map(
-																				(l) =>
-																					`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
-																			)
-																			.join('\n')}</pre>
-																</div>
-															{/if}
-														</div>
-													</li>
-												{/each}
-											</ul>
-										{/if}
-									</div>
-
-									{#if heal}
-										<div class="block">
-											<div class="label">heal session</div>
-											<div class="kv">
-												<span>id</span>
-												<a
-													href={resolve(
-														`/p/[projectId]/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/p/[projectId]/w/[workflowId]?${string}`,
-														{ projectId, workflowId: data.workflow.id }
-													)}><code>{heal.id}</code></a
-												>
-												<span class="badge {heal.status}">{heal.status}</span>
-											</div>
-										</div>
-									{/if}
-								</div>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</div>
-	</section>
-{/if}
-
-{#if activeTab === 'healings'}
-	<section>
-		<div class="card">
-			<h2>Heal sessions <span class="muted small">({data.heals.length})</span></h2>
-			{#if data.heals.length === 0}
-				<div class="muted small">No healings yet.</div>
-			{:else}
-				<ul class="rows">
-					{#each data.heals as h (h.id)}
-						<li>
-							<button class="row-btn" type="button" onclick={() => toggle(expandedHeals, h.id)}>
-								<div class="row-head">
-									<span class="mono">{shortId(h.id)}</span>
-									<span class="badge {h.status}">{h.status}</span>
-									<span class="muted small">started <LocalTime ms={h.startedAt} /></span>
-									<span class="muted small">· finished <LocalTime ms={h.finishedAt} /></span>
-								</div>
-								<div class="row-body muted small">
-									triggered by run {shortId(h.triggeringRunId)}
-									{#if h.testResults}
-										· tests {h.testResults.passed}/{h.testResults.total}
-									{/if}
-									{#if h.newVersionId}
-										· new version
-									{/if}
-									{#if h.status === 'needs_attention' && h.unhealableCategory}
-										· <span class="chip small">{unhealableLabel(h.unhealableCategory)}</span>
-									{/if}
-								</div>
-							</button>
-							{#if expandedHeals[h.id]}
-								<div class="details">
-									<div class="kv"><span>id</span><code>{h.id}</code></div>
-									<div class="kv"><span>triggering run</span><code>{h.triggeringRunId}</code></div>
-									{#if h.newVersionId}
-										<div class="kv">
-											<span>new version</span>
-											<a
-												href={resolve(
-													`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: h.newVersionId })}` as `/p/[projectId]/w/[workflowId]?${string}`,
-													{ projectId, workflowId: data.workflow.id }
-												)}><code>{h.newVersionId}</code></a
-											>
-										</div>
-									{/if}
-									{#if h.diff}
-										<div class="block">
-											<div class="label">diff</div>
-											<pre>{h.diff}</pre>
-										</div>
-									{/if}
-									{#if h.testResults}
-										<div class="block">
-											<div class="label">
-												test results ({h.testResults.passed}/{h.testResults.total})
-											</div>
-											<table class="inner">
-												<thead>
-													<tr><th>event</th><th>ok</th><th>error</th></tr>
-												</thead>
-												<tbody>
-													{#each h.testResults.details as d (d.eventId)}
-														<tr>
-															<td class="mono">{shortId(d.eventId)}</td>
-															<td>
-																{#if d.ok}
-																	<span class="badge ok">ok</span>
-																{:else}
-																	<span class="badge failed">fail</span>
-																{/if}
-															</td>
-															<td class="muted">
-																{#if d.error}
-																	{d.error.name}: {truncate(d.error.message, 120)}
-																{:else}—{/if}
-															</td>
-														</tr>
-													{/each}
-												</tbody>
-											</table>
-										</div>
-									{/if}
-									{#if h.agentTranscript && h.agentTranscript.length > 0}
-										<div class="block">
-											<button
-												class="disclosure"
-												type="button"
-												onclick={() => toggle(transcriptOpen, h.id)}
-											>
-												{transcriptOpen[h.id] ? '▾' : '▸'} agent transcript ({h.agentTranscript
-													.length})
-											</button>
-											{#if transcriptOpen[h.id]}
-												<ul class="transcript">
-													{#each h.agentTranscript as t, i (i)}
-														<li>
-															<div class="t-head">
-																<span class="chip small">{t.role}</span>
-																<span class="muted small"><LocalTime ms={t.ts} /></span>
-															</div>
-															<pre>{t.message}</pre>
-															{#if t.data !== undefined}
-																<pre class="data">{safeJson(t.data)}</pre>
-															{/if}
-														</li>
-													{/each}
-												</ul>
-											{/if}
-										</div>
-									{/if}
-								</div>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</div>
-	</section>
-{/if}
-
-{#if activeTab === 'code'}
-	<section>
-		<div class="card">
-			<div class="code-head">
-				<label>
-					<span>Version</span>
-					<select
-						onchange={(e) => {
-							const v = (e.currentTarget as HTMLSelectElement).value;
-							window.location.href = resolve(
-								`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: v })}` as `/p/[projectId]/w/[workflowId]?${string}`,
-								{ projectId, workflowId: data.workflow.id }
-							);
-						}}
-					>
-						{#each data.versions as v (v.id)}
-							<option value={v.id} selected={selectedVersion?.id === v.id}>
-								v{v.version} · {v.createdBy} · {utcLabel(v.createdAt)}
-								{v.id === data.currentVersion?.id ? '(current)' : ''}
-							</option>
-						{/each}
-					</select>
-				</label>
-			</div>
-
-			{#if selectedVersion}
-				<div class="version-meta">
-					<div class="kv"><span>version</span>{selectedVersion.version}</div>
-					<div class="kv"><span>createdBy</span>{selectedVersion.createdBy}</div>
-					<div class="kv"><span>createdAt</span><LocalTime ms={selectedVersion.createdAt} /></div>
-					{#if selectedVersion.parentVersionId}
-						<div class="kv">
-							<span>parent</span>
-							<a
-								href={resolve(
-									`/p/[projectId]/w/[workflowId]?${tabQuery('code', { version: selectedVersion.parentVersionId })}` as `/p/[projectId]/w/[workflowId]?${string}`,
-									{ projectId, workflowId: data.workflow.id }
-								)}><code>{selectedVersion.parentVersionId}</code></a
-							>
-						</div>
-					{/if}
-					{#if selectedVersion.healedFromRunId}
-						<div class="kv">
-							<span>healed from run</span>
-							<code>{selectedVersion.healedFromRunId}</code>
-						</div>
-					{/if}
-				</div>
-				<div class="code">
-					{#if data.selectedVersionSourceHtml}
-						<!-- Trusted HTML: shiki syntax-highlighter output, not user input. -->
-						<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-						{@html data.selectedVersionSourceHtml}
-					{:else}
-						<pre><code>{selectedVersion.sourceTs}</code></pre>
-					{/if}
-				</div>
-			{:else}
-				<div class="muted small">No version available.</div>
-			{/if}
-		</div>
-	</section>
-{/if}
 
 <style>
 	.head {
@@ -891,6 +895,13 @@
 		border-bottom: 1px solid #e5e7eb;
 		margin: 14px 0 20px;
 	}
+	/* Force a baseline height for any tab panel so short-content tabs (Code,
+	   Healings empty state) stay tall enough to keep the page scrollable.
+	   Combined with `scrollbar-gutter: stable` on <html>, this prevents the
+	   centered .container from jumping horizontally between tab switches. */
+	.tab-panel {
+		min-height: 60vh;
+	}
 	.tab {
 		padding: 10px 14px;
 		color: #4b5563;
@@ -915,14 +926,6 @@
 		padding: 0 7px;
 		font-size: 11px;
 		font-weight: 600;
-		font-variant-numeric: tabular-nums;
-		min-width: 1.5ch;
-		text-align: center;
-	}
-	/* Always render the badge so tab widths stay stable when counts transition
-	   0 ↔ n. `visibility: hidden` keeps the layout box intact. */
-	.tab-count-hidden {
-		visibility: hidden;
 	}
 	.grid {
 		display: grid;
