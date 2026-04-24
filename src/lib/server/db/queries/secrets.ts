@@ -1,4 +1,4 @@
-import { getDb, now } from '../index.ts';
+import { now } from '../index.ts';
 import { fetchAll, mapRow } from '../mappers.ts';
 import type { ProjectSecretMeta } from '../types.ts';
 
@@ -15,9 +15,12 @@ export function isValidSecretName(name: string): boolean {
 	return NAME_RE.test(name);
 }
 
-export async function listSecretNamesForProject(projectId: string): Promise<ProjectSecretMeta[]> {
+export async function listSecretNamesForProject(
+	db: D1Database,
+	projectId: string
+): Promise<ProjectSecretMeta[]> {
 	return fetchAll<ProjectSecretMetaRow, ProjectSecretMeta>(
-		getDb()
+		db
 			.prepare(
 				`SELECT project_id, name, created_at, updated_at
 				 FROM project_secrets WHERE project_id = ? ORDER BY name ASC`
@@ -27,6 +30,7 @@ export async function listSecretNamesForProject(projectId: string): Promise<Proj
 }
 
 export async function upsertSecret(
+	db: D1Database,
 	projectId: string,
 	name: string,
 	value: string
@@ -37,7 +41,7 @@ export async function upsertSecret(
 		);
 	}
 	const ts = now();
-	await getDb()
+	await db
 		.prepare(
 			`INSERT INTO project_secrets (project_id, name, value, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?)
@@ -46,7 +50,7 @@ export async function upsertSecret(
 		)
 		.bind(projectId, name, value, ts, ts)
 		.run();
-	const row = await getDb()
+	const row = await db
 		.prepare(
 			`SELECT project_id, name, created_at, updated_at
 			 FROM project_secrets WHERE project_id = ? AND name = ?`
@@ -59,8 +63,8 @@ export async function upsertSecret(
 	return mapRow<ProjectSecretMeta>(row);
 }
 
-export async function deleteSecret(projectId: string, name: string): Promise<void> {
-	await getDb()
+export async function deleteSecret(db: D1Database, projectId: string, name: string): Promise<void> {
+	await db
 		.prepare(`DELETE FROM project_secrets WHERE project_id = ? AND name = ?`)
 		.bind(projectId, name)
 		.run();

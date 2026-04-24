@@ -18,6 +18,7 @@ export type AgentEvent =
 	| { type: 'error'; error: string };
 
 export interface AgentRunOptions {
+	env: Env;
 	model?: string;
 	systemPrompt: string;
 	userMessage: string;
@@ -85,6 +86,7 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
 		let response;
 		try {
 			response = await createMessage(
+				opts.env,
 				{
 					model,
 					max_tokens: DEFAULT_MAX_TOKENS,

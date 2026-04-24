@@ -1,6 +1,4 @@
-import { env } from 'cloudflare:workers';
-
-export function getDb() {
+export function getDb(env: Env) {
 	return env.DB;
 }
 

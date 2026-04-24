@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { now, uuid } from '../index.ts';
 import { rowToDomain } from '../mappers.ts';
 import { parseJsonOrThrow } from '$lib/server/util';
 import type { Event, EventTriggerType } from '../types.ts';
@@ -31,13 +31,13 @@ export interface CreateEventInput {
 	receivedAt?: number;
 }
 
-export async function createEvent(input: CreateEventInput): Promise<Event> {
+export async function createEvent(db: D1Database, input: CreateEventInput): Promise<Event> {
 	const id = uuid();
 	const receivedAt = input.receivedAt ?? now();
 	const payload = input.payload ?? null;
 	const headers = input.headers ?? {};
 	const dedupKey = input.dedupKey ?? null;
-	await getDb()
+	await db
 		.prepare(
 			`INSERT INTO events (id, event_source_id, trigger_type, payload_json, headers_json, received_at, dedup_key)
 			 VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -63,8 +63,8 @@ export async function createEvent(input: CreateEventInput): Promise<Event> {
 	};
 }
 
-export async function getEvent(id: string): Promise<Event | null> {
-	const row = await getDb().prepare(`SELECT * FROM events WHERE id = ?`).bind(id).first<EventRow>();
+export async function getEvent(db: D1Database, id: string): Promise<Event | null> {
+	const row = await db.prepare(`SELECT * FROM events WHERE id = ?`).bind(id).first<EventRow>();
 	return row ? rowToEvent(row) : null;
 }
 
@@ -76,10 +76,11 @@ export interface ListEventsOptions {
 // SQLite treats a negative LIMIT as unbounded, so "no limit" is a single
 // parameterised query instead of a branched statement.
 export async function listEventsForSource(
+	db: D1Database,
 	sourceId: string,
 	opts: ListEventsOptions = {}
 ): Promise<Event[]> {
-	const res = await getDb()
+	const res = await db
 		.prepare(
 			`SELECT * FROM events WHERE event_source_id = ? AND received_at >= ? ORDER BY received_at DESC LIMIT ?`
 		)
@@ -89,10 +90,11 @@ export async function listEventsForSource(
 }
 
 export async function listEventsForWorkflow(
+	db: D1Database,
 	workflowId: string,
 	opts: ListEventsOptions = {}
 ): Promise<Event[]> {
-	const res = await getDb()
+	const res = await db
 		.prepare(
 			`SELECT e.* FROM events e
 			 JOIN workflows w ON w.event_source_id = e.event_source_id
@@ -104,8 +106,11 @@ export async function listEventsForWorkflow(
 	return res.results.map(rowToEvent);
 }
 
-export async function listAllEventsForWorkflow(workflowId: string): Promise<Event[]> {
-	const res = await getDb()
+export async function listAllEventsForWorkflow(
+	db: D1Database,
+	workflowId: string
+): Promise<Event[]> {
+	const res = await db
 		.prepare(
 			`SELECT e.* FROM events e
 			 JOIN workflows w ON w.event_source_id = e.event_source_id
@@ -117,8 +122,8 @@ export async function listAllEventsForWorkflow(workflowId: string): Promise<Even
 	return res.results.map(rowToEvent);
 }
 
-export async function countEventsForSource(sourceId: string): Promise<number> {
-	const row = await getDb()
+export async function countEventsForSource(db: D1Database, sourceId: string): Promise<number> {
+	const row = await db
 		.prepare(`SELECT COUNT(*) AS count FROM events WHERE event_source_id = ?`)
 		.bind(sourceId)
 		.first<{ count: number }>();
@@ -127,9 +132,10 @@ export async function countEventsForSource(sourceId: string): Promise<number> {
 
 // One query instead of N per-source counts.
 export async function countEventsBySourceForProject(
+	db: D1Database,
 	projectId: string
 ): Promise<Map<string, number>> {
-	const res = await getDb()
+	const res = await db
 		.prepare(
 			`SELECT e.event_source_id AS source_id, COUNT(*) AS count
 			 FROM events e

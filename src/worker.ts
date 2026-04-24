@@ -11,11 +11,11 @@ export { HealWorkflowFlow } from '$lib/server/workflows/heal-flow';
 
 export default {
 	fetch: sveltekitWorker.fetch.bind(sveltekitWorker),
-	async scheduled(controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
+	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
 		ctx.waitUntil(
 			(async () => {
 				try {
-					const result = await handleCronTick(controller.scheduledTime);
+					const result = await handleCronTick(env, controller.scheduledTime);
 					console.log(
 						`[cron] tick scanned=${result.scanned} fired=${result.fired.length} skipped=${result.skipped.length}`
 					);

@@ -1,3 +1,4 @@
+import { getDb } from '$lib/server/db';
 import { createEvent, getEvent } from '$lib/server/db/queries/events';
 import {
 	getActiveHealSession,
@@ -7,7 +8,6 @@ import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunStatus } from '$lib/server/db/types';
-import { env } from 'cloudflare:workers';
 import { errorMessage } from '$lib/server/util';
 import { type DispatchEvent, type InvokeOutcome, invokeDispatcher } from './dispatch';
 
@@ -98,17 +98,20 @@ async function retryWithBackoff<T>(
 	return last;
 }
 
-async function dispatchWithRetry(args: {
-	scriptName: string;
-	event: DispatchEvent;
-	workflow: { id: string; name: string };
-}): Promise<InvokeOutcome> {
+async function dispatchWithRetry(
+	env: Env,
+	args: {
+		scriptName: string;
+		event: DispatchEvent;
+		workflow: { id: string; name: string };
+	}
+): Promise<InvokeOutcome> {
 	const result = await retryWithBackoff<InvokeOutcome>(
 		'dispatch',
 		DISPATCH_MAX_ATTEMPTS,
 		DISPATCH_BASE_DELAY_MS,
 		async () => {
-			const outcome = await invokeDispatcher(args);
+			const outcome = await invokeDispatcher(env, args);
 			if (outcome.kind !== 'infra_error') {
 				return { done: true, value: outcome };
 			}
@@ -121,9 +124,11 @@ async function dispatchWithRetry(args: {
 // Workflows without a current version are skipped, but the event is still
 // persisted so it can be replayed or backfilled once they come online.
 export async function executeSourceEvent(
+	env: Env,
 	opts: ExecuteSourceEventOptions
 ): Promise<ExecuteSourceEventResult> {
-	const event = await createEvent({
+	const db = getDb(env);
+	const event = await createEvent(db, {
 		dedupKey: opts.dedupKey ?? null,
 		eventSourceId: opts.eventSourceId,
 		headers: opts.headers,
@@ -131,7 +136,7 @@ export async function executeSourceEvent(
 		triggerType: opts.trigger
 	});
 
-	const workflows = await listWorkflowsForEventSource(opts.eventSourceId);
+	const workflows = await listWorkflowsForEventSource(db, opts.eventSourceId);
 	const dispatched: WorkflowDispatchResult[] = [];
 
 	for (const workflow of workflows) {
@@ -145,7 +150,7 @@ export async function executeSourceEvent(
 			continue;
 		}
 		try {
-			const exec = await executeExistingEventForWorkflow(event.id, workflow.id);
+			const exec = await executeExistingEventForWorkflow(env, event.id, workflow.id);
 			dispatched.push({
 				error: exec.error,
 				result: exec.result,
@@ -172,8 +177,12 @@ export async function executeSourceEvent(
 	};
 }
 
-export async function executeManualEvent(opts: ExecuteManualOptions): Promise<ExecuteResult> {
-	const workflow = await getWorkflow(opts.workflowId);
+export async function executeManualEvent(
+	env: Env,
+	opts: ExecuteManualOptions
+): Promise<ExecuteResult> {
+	const db = getDb(env);
+	const workflow = await getWorkflow(db, opts.workflowId);
 	if (!workflow) {
 		throw new Error(`Workflow not found: ${opts.workflowId}`);
 	}
@@ -181,38 +190,40 @@ export async function executeManualEvent(opts: ExecuteManualOptions): Promise<Ex
 		throw new Error(`Workflow has no current version: ${opts.workflowId}`);
 	}
 
-	const event = await createEvent({
+	const event = await createEvent(db, {
 		dedupKey: opts.dedupKey ?? null,
 		eventSourceId: workflow.eventSourceId,
 		payload: opts.payload,
 		triggerType: 'manual'
 	});
 
-	return executeExistingEventForWorkflow(event.id, workflow.id);
+	return executeExistingEventForWorkflow(env, event.id, workflow.id);
 }
 
 export async function executeExistingEventForWorkflow(
+	env: Env,
 	eventId: string,
 	workflowId: string,
 	opts: ExecuteExistingForWorkflowOptions = {}
 ): Promise<ExecuteResult> {
-	const event = await getEvent(eventId);
+	const db = getDb(env);
+	const event = await getEvent(db, eventId);
 	if (!event) {
 		throw new Error(`Event not found: ${eventId}`);
 	}
 
-	const workflow = await getWorkflow(workflowId);
+	const workflow = await getWorkflow(db, workflowId);
 	if (!workflow) {
 		throw new Error(`Workflow not found: ${workflowId}`);
 	}
 
-	const version = await getCurrentVersion(workflow.id);
+	const version = await getCurrentVersion(db, workflow.id);
 	if (!version) {
 		throw new Error(`Workflow has no current version: ${workflow.id}`);
 	}
 
 	return withLock(workflow.id, async () => {
-		const run = await createRun({
+		const run = await createRun(db, {
 			eventId: event.id,
 			isReplay: opts.isReplay ?? false,
 			parentRunId: opts.parentRunId ?? null,
@@ -220,7 +231,7 @@ export async function executeExistingEventForWorkflow(
 			workflowId: workflow.id
 		});
 
-		const outcome = await dispatchWithRetry({
+		const outcome = await dispatchWithRetry(env, {
 			event: {
 				headers: event.headers,
 				id: event.id,
@@ -233,7 +244,7 @@ export async function executeExistingEventForWorkflow(
 		});
 
 		if (outcome.kind === 'ok') {
-			await finishRunOk(run.id, outcome.result, outcome.logs);
+			await finishRunOk(db, run.id, outcome.result, outcome.logs);
 			return {
 				eventId: event.id,
 				result: outcome.result,
@@ -246,7 +257,7 @@ export async function executeExistingEventForWorkflow(
 		// by error.category); only user_error spawns a heal below.
 		const runError = outcome.error;
 		const runLogs = outcome.kind === 'user_error' ? outcome.logs : [];
-		await finishRunFailed(run.id, runError, runLogs);
+		await finishRunFailed(db, run.id, runError, runLogs);
 
 		if (outcome.kind === 'infra_error') {
 			console.error(
@@ -260,7 +271,7 @@ export async function executeExistingEventForWorkflow(
 			};
 		}
 
-		const needsAttention = await getOpenNeedsAttentionSession(workflow.id);
+		const needsAttention = await getOpenNeedsAttentionSession(db, workflow.id);
 		if (needsAttention) {
 			console.log(
 				`[heal] skipping create for runId=${run.id}: workflow has unresolved needs_attention session (sessionId=${needsAttention.id})`
@@ -275,7 +286,7 @@ export async function executeExistingEventForWorkflow(
 		// Dedup: at most one in-flight heal per workflow. Small race window
 		// (two simultaneous failures can both spawn) bounds waste to ~2×.
 		// Missed failures are replayed by the winning heal's post-deploy sweep.
-		const activeHeal = await getActiveHealSession(workflow.id);
+		const activeHeal = await getActiveHealSession(db, workflow.id);
 		if (activeHeal) {
 			console.log(
 				`[heal] skipping create for runId=${run.id}: active session already running (sessionId=${activeHeal.id})`

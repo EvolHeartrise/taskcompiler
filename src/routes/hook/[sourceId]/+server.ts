@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { getDb } from '$lib/server/db';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { ingestWebhookEvent } from '$lib/server/webhooks/ingest';
 import type { ExecuteSourceEventResult } from '$lib/server/engine';
@@ -58,6 +59,7 @@ function fanoutResponse(res: ExecuteSourceEventResult): Response {
 }
 
 async function handle(
+	env: Env,
 	sourceId: string | undefined,
 	headers: Headers,
 	extractPayload: () => Promise<{ ok: true; payload: unknown } | { ok: false }>
@@ -65,7 +67,7 @@ async function handle(
 	if (!sourceId) {
 		return errorJson(400, 'missing sourceId');
 	}
-	const source = await getEventSource(sourceId);
+	const source = await getEventSource(getDb(env), sourceId);
 	if (!source) {
 		return errorJson(404, 'event source not found');
 	}
@@ -77,7 +79,7 @@ async function handle(
 		return errorJson(400, 'invalid request body');
 	}
 	try {
-		const res = await ingestWebhookEvent({
+		const res = await ingestWebhookEvent(env, {
 			eventSourceId: source.id,
 			payload: parsed.payload,
 			rawHeaders: headers
@@ -88,11 +90,11 @@ async function handle(
 	}
 }
 
-export const POST: RequestHandler = ({ params, request }) =>
-	handle(params.sourceId, request.headers, () => parseBody(request));
+export const POST: RequestHandler = ({ params, request, platform }) =>
+	handle(platform!.env, params.sourceId, request.headers, () => parseBody(request));
 
-export const GET: RequestHandler = ({ params, request, url }) =>
-	handle(params.sourceId, request.headers, () => {
+export const GET: RequestHandler = ({ params, request, url, platform }) =>
+	handle(platform!.env, params.sourceId, request.headers, () => {
 		const payload: Record<string, string> = {};
 		for (const [k, v] of url.searchParams.entries()) {
 			payload[k] = v;

@@ -20,14 +20,18 @@ function isPublic(pathname: string): boolean {
 	return false;
 }
 
-const authHandler: Handle = ({ event, resolve }) =>
-	svelteKitHandler({ event, resolve, auth: auth(), building });
+const authHandler: Handle = ({ event, resolve }) => {
+	if (!event.platform) {
+		return resolve(event);
+	}
+	return svelteKitHandler({ event, resolve, auth: auth(event.platform.env), building });
+};
 
 const sessionHandler: Handle = async ({ event, resolve }) => {
 	if (!event.platform) {
 		return resolve(event);
 	}
-	const result = await auth().api.getSession({ headers: event.request.headers });
+	const result = await auth(event.platform.env).api.getSession({ headers: event.request.headers });
 	event.locals.user = result?.user ?? null;
 	event.locals.session = result?.session ?? null;
 

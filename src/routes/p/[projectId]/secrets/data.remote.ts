@@ -1,4 +1,5 @@
-import { form, query } from '$app/server';
+import { form, getRequestEvent, query } from '$app/server';
+import { getDb } from '$lib/server/db';
 import {
 	deleteSecret as deleteSecretRow,
 	isValidSecretName,
@@ -9,13 +10,15 @@ import { errorMessage } from '$lib/server/util';
 
 type Result = { ok: true; name: string } | { ok: false; error: string };
 
-export const getSecrets = query('unchecked', async (projectId: string) =>
-	listSecretNamesForProject(projectId)
-);
+export const getSecrets = query('unchecked', async (projectId: string) => {
+	const event = getRequestEvent();
+	return listSecretNamesForProject(getDb(event.platform!.env), projectId);
+});
 
 export const upsertSecret = form(
 	'unchecked',
 	async (data: { projectId: string; name: string; value: string }): Promise<Result> => {
+		const event = getRequestEvent();
 		const projectId = (data.projectId ?? '').trim();
 		const rawName = (data.name ?? '').trim();
 		const value = data.value ?? '';
@@ -40,7 +43,7 @@ export const upsertSecret = form(
 		}
 
 		try {
-			await upsertSecretRow(projectId, name, value);
+			await upsertSecretRow(getDb(event.platform!.env), projectId, name, value);
 		} catch (err) {
 			return { ok: false, error: errorMessage(err) };
 		}
@@ -53,6 +56,7 @@ export const upsertSecret = form(
 export const deleteSecret = form(
 	'unchecked',
 	async (data: { projectId: string; name: string }): Promise<Result> => {
+		const event = getRequestEvent();
 		const projectId = (data.projectId ?? '').trim();
 		const name = (data.name ?? '').trim();
 
@@ -64,7 +68,7 @@ export const deleteSecret = form(
 		}
 
 		try {
-			await deleteSecretRow(projectId, name);
+			await deleteSecretRow(getDb(event.platform!.env), projectId, name);
 		} catch (err) {
 			return { ok: false, error: errorMessage(err) };
 		}

@@ -1,6 +1,7 @@
 import { type AgentEvent, type AgentRunResult, DEFAULT_MODEL, runAgent } from '../loop.ts';
 import type { Tool } from '../tools.ts';
 import { defineTool } from '../tool-schema.ts';
+import { getDb } from '$lib/server/db';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/events';
@@ -12,6 +13,7 @@ import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/serv
 import { errorMessage, truncate } from '$lib/server/util';
 
 export interface HealOptions {
+	env: Env;
 	workflowId: string;
 	triggeringRunId: string;
 	model?: string;
@@ -207,7 +209,7 @@ function makeReadSourceTool(sourceTs: string): Tool {
 	});
 }
 
-function makeListEventsTool(workflowId: string): Tool {
+function makeListEventsTool(env: Env, workflowId: string): Tool {
 	return defineTool<{ limit: number }>({
 		name: 'list_events',
 		description:
@@ -220,7 +222,7 @@ function makeListEventsTool(workflowId: string): Tool {
 			}
 		},
 		async run({ limit }): Promise<string> {
-			const all = await listAllEventsForWorkflow(workflowId);
+			const all = await listAllEventsForWorkflow(getDb(env), workflowId);
 			const slice = all.slice(-Math.max(1, Math.floor(limit)));
 			const out = slice.map((e) => ({
 				id: e.id,
@@ -233,7 +235,7 @@ function makeListEventsTool(workflowId: string): Tool {
 	});
 }
 
-function makeGetEventTool(workflowId: string, eventSourceId: string): Tool {
+function makeGetEventTool(env: Env, workflowId: string, eventSourceId: string): Tool {
 	return defineTool<{ id: string }>({
 		name: 'get_event',
 		description:
@@ -243,7 +245,7 @@ function makeGetEventTool(workflowId: string, eventSourceId: string): Tool {
 		},
 		required: ['id'],
 		async run({ id }): Promise<string> {
-			const event = await getEvent(id);
+			const event = await getEvent(getDb(env), id);
 			if (!event) {
 				throw new Error(`get_event: event not found: ${id}`);
 			}
@@ -262,7 +264,7 @@ function makeGetEventTool(workflowId: string, eventSourceId: string): Tool {
 	});
 }
 
-function makeListFailedRunsTool(workflowId: string): Tool {
+function makeListFailedRunsTool(env: Env, workflowId: string): Tool {
 	return defineTool<{ limit: number }>({
 		name: 'list_failed_runs',
 		description:
@@ -275,7 +277,7 @@ function makeListFailedRunsTool(workflowId: string): Tool {
 			}
 		},
 		async run({ limit }): Promise<string> {
-			const all = await listFailedRunsForWorkflow(workflowId);
+			const all = await listFailedRunsForWorkflow(getDb(env), workflowId);
 			const slice = all.slice(0, Math.max(1, Math.floor(limit)));
 			const out = slice.map((r) => ({
 				error: r.error,
@@ -288,7 +290,7 @@ function makeListFailedRunsTool(workflowId: string): Tool {
 	});
 }
 
-function makeGetRunTool(workflowId: string): Tool {
+function makeGetRunTool(env: Env, workflowId: string): Tool {
 	return defineTool<{ runId: string }>({
 		name: 'get_run',
 		description: 'Fetch a full run including logs by id. The run must belong to this workflow.',
@@ -297,7 +299,7 @@ function makeGetRunTool(workflowId: string): Tool {
 		},
 		required: ['runId'],
 		async run({ runId }): Promise<string> {
-			const run = await getRun(runId);
+			const run = await getRun(getDb(env), runId);
 			if (!run) {
 				throw new Error(`get_run: run not found: ${runId}`);
 			}
@@ -320,7 +322,7 @@ function makeGetRunTool(workflowId: string): Tool {
 	});
 }
 
-function makeRunTestEventTool(workflowId: string): Tool {
+function makeRunTestEventTool(env: Env, workflowId: string): Tool {
 	return defineTool<{ event_id: string; source_ts: string }>({
 		name: 'run_test_event',
 		description:
@@ -331,18 +333,19 @@ function makeRunTestEventTool(workflowId: string): Tool {
 		},
 		required: ['event_id', 'source_ts'],
 		async run({ event_id, source_ts }): Promise<string> {
-			const event = await getEvent(event_id);
+			const db = getDb(env);
+			const event = await getEvent(db, event_id);
 			if (!event) {
 				throw new Error(`run_test_event: event not found: ${event_id}`);
 			}
-			const workflow = await getWorkflow(workflowId);
+			const workflow = await getWorkflow(db, workflowId);
 			if (!workflow) {
 				throw new Error(`run_test_event: workflow not found: ${workflowId}`);
 			}
 			if (event.eventSourceId !== workflow.eventSourceId) {
 				throw new Error("run_test_event: event does not belong to this workflow's event source");
 			}
-			const res = await runAgainstEventEphemeral(source_ts, event, workflow);
+			const res = await runAgainstEventEphemeral(env, source_ts, event, workflow);
 			const tail = res.logs.slice(-20);
 			return JSON.stringify({
 				durationMs: res.durationMs,
@@ -390,7 +393,8 @@ function formatTerminal(payload: EmittedPayload): string {
 }
 
 export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
-	const workflow = await getWorkflow(opts.workflowId);
+	const db = getDb(opts.env);
+	const workflow = await getWorkflow(db, opts.workflowId);
 	if (!workflow) {
 		return {
 			agentTranscript: [],
@@ -399,7 +403,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		};
 	}
 
-	const currentVersion = await getCurrentVersion(opts.workflowId);
+	const currentVersion = await getCurrentVersion(db, opts.workflowId);
 	if (!currentVersion) {
 		return {
 			agentTranscript: [],
@@ -410,10 +414,10 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 
 	const currentSource = currentVersion.sourceTs;
 
-	const triggeringRun = await getRun(opts.triggeringRunId);
-	const failedEvent = triggeringRun ? await getEvent(triggeringRun.eventId) : null;
-	const historicalEventCount = (await listAllEventsForWorkflow(opts.workflowId)).length;
-	const secretMetas = await listSecretNamesForProject(workflow.projectId);
+	const triggeringRun = await getRun(db, opts.triggeringRunId);
+	const failedEvent = triggeringRun ? await getEvent(db, triggeringRun.eventId) : null;
+	const historicalEventCount = (await listAllEventsForWorkflow(db, opts.workflowId)).length;
+	const secretMetas = await listSecretNamesForProject(db, workflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
 
 	const userMessage = buildUserMessage({
@@ -436,11 +440,11 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 
 	const tools: Tool[] = [
 		makeReadSourceTool(currentSource),
-		makeListEventsTool(opts.workflowId),
-		makeGetEventTool(opts.workflowId, workflow.eventSourceId),
-		makeListFailedRunsTool(opts.workflowId),
-		makeGetRunTool(opts.workflowId),
-		makeRunTestEventTool(opts.workflowId),
+		makeListEventsTool(opts.env, opts.workflowId),
+		makeGetEventTool(opts.env, opts.workflowId, workflow.eventSourceId),
+		makeListFailedRunsTool(opts.env, opts.workflowId),
+		makeGetRunTool(opts.env, opts.workflowId),
+		makeRunTestEventTool(opts.env, opts.workflowId),
 		wrapTerminal<EmittedPayload>(
 			makeTypecheckedEmitTool<EmittedPayload>({
 				name: 'emit_fixed_workflow',
@@ -461,6 +465,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 	try {
 		result = await runAgent({
 			abortSignal: controller.signal,
+			env: opts.env,
 			maxTurns: opts.maxTurns ?? 50,
 			model: opts.model ?? DEFAULT_MODEL,
 			onEvent: opts.onEvent,

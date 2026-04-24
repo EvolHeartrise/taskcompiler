@@ -1,4 +1,3 @@
-import { env } from 'cloudflare:workers';
 import type { EventTriggerType, RunError, RunLogEntry } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
 import { classifyInfraFailure } from './run-error';
@@ -23,11 +22,14 @@ export type InvokeOutcome =
 	| { kind: 'user_error'; error: RunError; logs: RunLogEntry[] }
 	| { kind: 'infra_error'; error: RunError };
 
-export async function invokeDispatcher(args: {
-	scriptName: string;
-	event: DispatchEvent;
-	workflow: { id: string; name: string };
-}): Promise<InvokeOutcome> {
+export async function invokeDispatcher(
+	env: Env,
+	args: {
+		scriptName: string;
+		event: DispatchEvent;
+		workflow: { id: string; name: string };
+	}
+): Promise<InvokeOutcome> {
 	let response: Response;
 	try {
 		response = await env.DISPATCHER.get(args.scriptName).fetch('https://workflow.invoke/', {

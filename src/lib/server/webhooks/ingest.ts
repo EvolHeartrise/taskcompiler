@@ -12,10 +12,11 @@ export interface IngestWebhookInput {
 }
 
 export async function ingestWebhookEvent(
+	env: Env,
 	input: IngestWebhookInput
 ): Promise<ExecuteSourceEventResult> {
 	const headers = redactHeaders(input.rawHeaders);
-	return executeSourceEvent({
+	return executeSourceEvent(env, {
 		eventSourceId: input.eventSourceId,
 		headers,
 		payload: input.payload,

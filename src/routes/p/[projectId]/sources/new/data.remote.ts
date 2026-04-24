@@ -1,5 +1,6 @@
 import { redirect } from '@sveltejs/kit';
-import { form } from '$app/server';
+import { form, getRequestEvent } from '$app/server';
+import { getDb } from '$lib/server/db';
 import { createEventSource } from '$lib/server/db/queries/event-sources';
 import type { TriggerType } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
@@ -17,6 +18,7 @@ export const createEventSourceForProject = form(
 		trigger: string;
 		cronExpr: string;
 	}): Promise<Result | undefined> => {
+		const event = getRequestEvent();
 		const projectId = (data.projectId ?? '').trim();
 		const name = (data.name ?? '').trim();
 		const triggerRaw = (data.trigger ?? '').trim();
@@ -41,7 +43,7 @@ export const createEventSourceForProject = form(
 		const id = crypto.randomUUID();
 
 		try {
-			await createEventSource({
+			await createEventSource(getDb(event.platform!.env), {
 				cronExpr: cronExpr || null,
 				id,
 				name,

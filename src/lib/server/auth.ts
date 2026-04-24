@@ -2,7 +2,6 @@ import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink } from 'better-auth/plugins';
 import { sveltekitCookies } from 'better-auth/svelte-kit';
-import { env as cfEnv } from 'cloudflare:workers';
 import { drizzle } from 'drizzle-orm/d1';
 import { getRequestEvent } from '$app/server';
 import * as schema from './db/auth-schema';
@@ -75,11 +74,16 @@ async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 	}
 }
 
-let cached: Auth | null = null;
+// Cache keyed by env identity so per-request env (or test envs) build their own
+// Auth instance. In prod the Worker hands out the same env reference for the
+// lifetime of the isolate, so the WeakMap behaves like a singleton there.
+const cache = new WeakMap<Env, Auth>();
 
-export function auth(): Auth {
-	if (!cached) {
-		cached = buildAuth(cfEnv);
+export function auth(env: Env): Auth {
+	let instance = cache.get(env);
+	if (!instance) {
+		instance = buildAuth(env);
+		cache.set(env, instance);
 	}
-	return cached;
+	return instance;
 }

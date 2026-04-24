@@ -6,6 +6,7 @@ import {
 	deployHealedVersion,
 	runHealTestSweep
 } from '$lib/server/healer/orchestrator';
+import { getDb } from '$lib/server/db';
 import {
 	createHealSession,
 	finishHealSession,
@@ -50,19 +51,16 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		step: WorkflowStep
 	): Promise<HealWorkflowResult> {
 		const { workflowId, triggeringRunId } = event.payload;
-
-		// See gen-flow.ts for the rationale on this synchronous binding touch —
-		// it prevents step.do callbacks from hanging on the first lazy env access.
-		void this.env.DISPATCHER;
+		const env = this.env;
 
 		const healSessionId = await step.do('create-heal-session', async () => {
-			const session = await createHealSession({ triggeringRunId, workflowId });
+			const session = await createHealSession(getDb(env), { triggeringRunId, workflowId });
 			return session.id;
 		});
 
 		// Captured pre-heal for diff computation in failure branches.
 		const previousSourceTs = await step.do('read-current-source', async () => {
-			const cur = await getCurrentVersion(workflowId);
+			const cur = await getCurrentVersion(getDb(env), workflowId);
 			return cur?.sourceTs ?? null;
 		});
 
@@ -73,12 +71,12 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			'agent-heal',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
 			async (): Promise<AgentStepSummary> => {
-				const outcome = await healWorkflow({ triggeringRunId, workflowId });
+				const outcome = await healWorkflow({ env, triggeringRunId, workflowId });
 				const transcript = agentEventsToTranscript(outcome.agentTranscript);
 
 				if (outcome.kind === 'fixed') {
 					// Leave session `running`; downstream steps finalize it.
-					await updateHealSessionTranscript(healSessionId, transcript);
+					await updateHealSessionTranscript(getDb(env), healSessionId, transcript);
 					return {
 						kind: 'fixed',
 						sourceTs: outcome.sourceTs,
@@ -87,7 +85,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 				}
 
 				if (outcome.kind === 'unhealable') {
-					await finishHealSession(healSessionId, {
+					await finishHealSession(getDb(env), healSessionId, {
 						agentTranscript: transcript,
 						diff: null,
 						newVersionId: null,
@@ -103,7 +101,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 					};
 				}
 
-				await finishHealSession(healSessionId, {
+				await finishHealSession(getDb(env), healSessionId, {
 					agentTranscript: transcript,
 					diff: null,
 					newVersionId: null,
@@ -137,14 +135,14 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			'test-sweep',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
 			async (): Promise<HealTestResults & { abortedEarly: boolean }> => {
-				const sweep = await runHealTestSweep(workflowId, candidateSourceTs);
+				const sweep = await runHealTestSweep(env, workflowId, candidateSourceTs);
 				return { ...sweep.results, abortedEarly: sweep.abortedEarly };
 			}
 		);
 
 		if (sweepResults.failed > 0) {
 			await step.do('finish-session-sweep-failed', async () => {
-				await finishHealSession(healSessionId, {
+				await finishHealSession(getDb(env), healSessionId, {
 					agentTranscript: null,
 					diff: previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
 					newVersionId: null,
@@ -175,7 +173,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 				'deploy-and-replay',
 				{ retries: { delay: '5 seconds', limit: 2 }, timeout: '5 minutes' },
 				async (): Promise<string> => {
-					const result = await deployHealedVersion({
+					const result = await deployHealedVersion(env, {
 						healSessionId,
 						sourceTs: candidateSourceTs,
 						sweep: {
@@ -193,7 +191,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		} catch (error) {
 			const message = errorMessage(error);
 			await step.do('finish-session-deploy-failed', async () => {
-				await finishHealSession(healSessionId, {
+				await finishHealSession(getDb(env), healSessionId, {
 					agentTranscript: null,
 					diff: previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
 					newVersionId: null,

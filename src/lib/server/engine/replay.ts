@@ -1,3 +1,4 @@
+import { getDb } from '$lib/server/db';
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsByEvent, markRunSuperseded } from '$lib/server/db/queries/runs';
 import { errorMessage } from '$lib/server/util';
@@ -44,20 +45,21 @@ async function dispatchAndTally<T>(
 	return result;
 }
 
-export async function replayFailedEvents(workflowId: string): Promise<DispatchTally> {
-	const failed = await listFailedRunsByEvent(workflowId);
+export async function replayFailedEvents(env: Env, workflowId: string): Promise<DispatchTally> {
+	const db = getDb(env);
+	const failed = await listFailedRunsByEvent(db, workflowId);
 	return dispatchAndTally(workflowId, failed, async (old) => {
-		await markRunSuperseded(old.id);
-		return executeExistingEventForWorkflow(old.eventId, workflowId, {
+		await markRunSuperseded(db, old.id);
+		return executeExistingEventForWorkflow(env, old.eventId, workflowId, {
 			isReplay: true,
 			parentRunId: old.id
 		});
 	});
 }
 
-export async function backfillWorkflow(workflowId: string): Promise<DispatchTally> {
-	const events = await listAllEventsForWorkflow(workflowId);
+export async function backfillWorkflow(env: Env, workflowId: string): Promise<DispatchTally> {
+	const events = await listAllEventsForWorkflow(getDb(env), workflowId);
 	return dispatchAndTally(workflowId, events, (event) =>
-		executeExistingEventForWorkflow(event.id, workflowId, { isReplay: true })
+		executeExistingEventForWorkflow(env, event.id, workflowId, { isReplay: true })
 	);
 }

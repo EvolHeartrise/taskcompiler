@@ -19,6 +19,7 @@ function ephemeralNonce(): string {
 }
 
 export async function runAgainstEventEphemeral(
+	env: Env,
 	sourceTs: string,
 	event: Event,
 	workflow: Workflow
@@ -29,7 +30,7 @@ export async function runAgainstEventEphemeral(
 	let uploaded = false;
 	try {
 		try {
-			await uploadWorkflow({
+			await uploadWorkflow(env, {
 				bindings: [projectIdBinding(workflow.projectId)],
 				scriptName,
 				userSourceTs: sourceTs
@@ -44,7 +45,7 @@ export async function runAgainstEventEphemeral(
 			};
 		}
 
-		const outcome = await invokeDispatcher({
+		const outcome = await invokeDispatcher(env, {
 			event: {
 				headers: event.headers,
 				id: event.id,
@@ -69,7 +70,7 @@ export async function runAgainstEventEphemeral(
 	} finally {
 		if (uploaded) {
 			try {
-				await deleteWorkflow(scriptName);
+				await deleteWorkflow(env, scriptName);
 			} catch (error) {
 				console.error('test-runner: failed to delete ephemeral script', {
 					error: errorMessage(error),
