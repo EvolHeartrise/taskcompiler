@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { rowToDomain } from '../mappers.ts';
 import { parseJson } from '$lib/server/util';
 import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
 
@@ -21,13 +21,12 @@ interface RunRow {
 const RUN_JSON_COLS = ['error_json', 'result_json', 'logs_json', 'is_replay'] as const;
 
 function rowToRun(row: RunRow): Run {
-	return {
-		...mapRow<Omit<Run, 'error' | 'result' | 'logs' | 'isReplay'>>(row, RUN_JSON_COLS),
+	return rowToDomain<RunRow, Run>(row, RUN_JSON_COLS, {
 		error: parseJson<RunError>(row.error_json),
 		isReplay: row.is_replay !== 0,
 		logs: parseJson<RunLogEntry[]>(row.logs_json),
 		result: parseJson<unknown>(row.result_json)
-	};
+	});
 }
 
 export interface CreateRunInput {

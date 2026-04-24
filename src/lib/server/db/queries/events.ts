@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { rowToDomain } from '../mappers.ts';
 import { parseJsonOrThrow } from '$lib/server/util';
 import type { Event, EventTriggerType } from '../types.ts';
 
@@ -13,12 +13,13 @@ interface EventRow {
 	dedup_key: string | null;
 }
 
+const EVENT_JSON_COLS = ['payload_json', 'headers_json'] as const;
+
 function rowToEvent(row: EventRow): Event {
-	return {
-		...mapRow<Omit<Event, 'payload' | 'headers'>>(row, ['payload_json', 'headers_json']),
+	return rowToDomain<EventRow, Event>(row, EVENT_JSON_COLS, {
 		headers: parseJsonOrThrow<Record<string, string>>(row.headers_json, 'event.headers_json'),
 		payload: parseJsonOrThrow<unknown>(row.payload_json, 'event.payload_json')
-	};
+	});
 }
 
 export interface CreateEventInput {
