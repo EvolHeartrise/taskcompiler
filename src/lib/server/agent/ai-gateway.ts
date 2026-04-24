@@ -214,6 +214,13 @@ function fromOAIResponse(resp: OAIResponse): MessagesResponse {
 	};
 }
 
+// Cap a single AI Gateway round-trip at this. Workflows steps run inside
+// a Worker invocation with a hard ~5min wall (CF Workflows limits), so a
+// hung fetch can sink the whole agent step. 60s is comfortably above
+// observed p99 latency for kimi-k2.6 with tools, while still leaving room
+// for several turns to retry within one step.
+const AI_GATEWAY_REQUEST_TIMEOUT_MS = 60_000;
+
 export async function createMessage(
 	env: Env,
 	body: MessagesRequest,
@@ -252,15 +259,28 @@ export async function createMessage(
 		oaiBody.temperature = body.temperature;
 	}
 
-	const res = await fetch(url, {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${cfToken}`,
-			'content-type': 'application/json'
-		},
-		body: JSON.stringify(oaiBody),
-		signal: opts?.signal
-	});
+	const timeoutSignal = AbortSignal.timeout(AI_GATEWAY_REQUEST_TIMEOUT_MS);
+	const signal = opts?.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
+
+	let res: Response;
+	try {
+		res = await fetch(url, {
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${cfToken}`,
+				'content-type': 'application/json'
+			},
+			body: JSON.stringify(oaiBody),
+			signal
+		});
+	} catch (error) {
+		if (timeoutSignal.aborted) {
+			throw new Error(`AI Gateway request timed out after ${AI_GATEWAY_REQUEST_TIMEOUT_MS}ms`, {
+				cause: error
+			});
+		}
+		throw error;
+	}
 
 	if (!res.ok) {
 		const text = await res.text().catch(() => '');
