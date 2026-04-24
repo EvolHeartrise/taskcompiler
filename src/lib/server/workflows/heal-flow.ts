@@ -51,10 +51,19 @@ type AgentStepSummary =
 // Each heal_session row claimed by the executor must reach a terminal
 // status — otherwise the partial unique index permanently blocks future
 // heals for that workflow. The outer try/catch in run() guarantees that
-// any in-process exception releases the slot; releaseStaleHealClaim in
-// the executor handles the harder case of the workflow being killed
+// any in-process exception releases the slot; claimHealSlotWithStaleRecovery
+// in the executor handles the harder case of the workflow being killed
 // before any JS runs (worker eviction, queue eviction, etc).
-const HEAL_AGENT_MAX_TURNS = 30;
+//
+// HEAL_AGENT_MAX_TURNS sits well under the runAgent default of 50 to fit
+// inside the Workflows per-step CPU budget (5 min configurable on Paid).
+// Empirically the model resolves a typical webhook-shape bug in ~10-15
+// turns including the post-fix `run_test_event` validation calls; 15
+// gives modest headroom without inviting 5-min step timeouts.
+//
+// Followup: split the agent loop across multiple step.do calls (one per
+// turn or per N turns) so the per-step budget no longer caps loop length.
+const HEAL_AGENT_MAX_TURNS = 15;
 
 export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams> {
 	async run(
@@ -122,6 +131,10 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		// Terminal branches (unhealable / failed / abandoned) finalize the
 		// session row inline — the transcript is persisted here so it never
 		// has to cross a step boundary.
+		// Step `timeout` is the WALL across all retries (including the
+		// `delay` between them); each individual invocation is still bound
+		// by Workers' per-call CPU/wall budget (~5 min on Paid). Two retries
+		// at 5 min each + 5 s delay fits in the 15-minute envelope.
 		const agentSummary = await step.do(
 			'agent-heal',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '15 minutes' },
