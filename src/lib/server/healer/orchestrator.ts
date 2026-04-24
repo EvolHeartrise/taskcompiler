@@ -59,8 +59,8 @@ export function computeDiff(oldSource: string, newSource: string): string {
 	const m = a.length;
 	const n = b.length;
 
-	// LCS table. Loop bounds guarantee every dp access below is in-bounds;
-	// The `!` assertions satisfy noUncheckedIndexedAccess, not correctness.
+	// Loop bounds guarantee every dp access is in-bounds; the `!` assertions
+	// satisfy noUncheckedIndexedAccess, not correctness.
 	const dp: number[][] = Array.from({ length: m + 1 }, () =>
 		Array.from({ length: n + 1 }, () => 0)
 	);
@@ -103,13 +103,8 @@ export function computeDiff(oldSource: string, newSource: string): string {
 	return lines.join('\n');
 }
 
-/**
- * Authoritative test sweep: run a candidate source against every historical
- * event for the workflow. Bails early after EARLY_OUT_FAIL_THRESHOLD failures
- * (each iteration deploys/invokes/tears down a temp WFP script).
- *
- * Persists nothing; the caller decides what to do with the result.
- */
+// Bails after EARLY_OUT_FAIL_THRESHOLD failures — each iteration deploys,
+// invokes, and tears down a temp WFP script. Persists nothing.
 export async function runHealTestSweep(
 	workflowId: string,
 	sourceTs: string
@@ -154,14 +149,9 @@ export async function runHealTestSweep(
 	};
 }
 
-/**
- * Promote a healed candidate: upload the new WFP script, create the version
- * row, mark the heal session success, and replay previously-failed events.
- *
- * The agent transcript is expected to have already been persisted to the
- * heal_session row (by the workflow's agent step); this function only
- * patches in the diff, sweep results, status, and new version id.
- */
+// The agent transcript is expected to have already been persisted to the
+// heal_session row by the workflow's agent step; this function only patches
+// in the diff, sweep results, status, and new version id.
 export async function deployHealedVersion(args: {
 	workflowId: string;
 	sourceTs: string;
@@ -191,11 +181,8 @@ export async function deployHealedVersion(args: {
 		workflowId
 	});
 
-	// Pass undefined for agentTranscript so finishHealSession's UPDATE will
-	// Null the column. The transcript was already written by the agent step
-	// Via updateHealSessionTranscript and we don't want to drop it.
-	// FinishHealSession serializes `null` when transcript is undefined, so
-	// We read+pass it explicitly to preserve it.
+	// finishHealSession nulls the column when agentTranscript is undefined,
+	// so re-read and pass the transcript the agent step already wrote.
 	const session = await getHealSessionAgentTranscript(healSessionId);
 
 	await finishHealSession(healSessionId, {

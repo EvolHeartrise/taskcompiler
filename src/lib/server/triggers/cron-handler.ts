@@ -13,10 +13,9 @@ export interface CronTickResult {
 	skipped: { eventSourceId: string; reason: string }[];
 }
 
-// Fires AT MOST ONCE per event source per tick. If multiple cron intervals
-// Were missed (e.g. the control plane was down), only the next tick will
-// Fire — we do NOT backfill missed intervals here. Intentional catch-up
-// Requires a separate pass.
+// Fires at most once per event source per tick. Missed intervals (e.g.
+// during a control-plane outage) are not backfilled here — catch-up needs
+// a separate pass.
 export async function handleCronTick(now: number = Date.now()): Promise<CronTickResult> {
 	const sources = await listCronEventSources();
 	const result: CronTickResult = {

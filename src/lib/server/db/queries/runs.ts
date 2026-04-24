@@ -138,8 +138,7 @@ export interface RunStats {
 	failed: number;
 }
 
-// Batched run stats per workflow for a project — one query instead of N
-// Per-workflow list lookups from the home loader.
+// One query instead of N per-workflow list lookups.
 export async function getRunStatsForProject(projectId: string): Promise<Map<string, RunStats>> {
 	const res = await getDb()
 		.prepare(

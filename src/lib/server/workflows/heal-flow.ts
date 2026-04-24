@@ -36,11 +36,10 @@ export interface HealWorkflowResult {
 	unhealableCategory?: UnhealableCategory;
 }
 
-// Minimal serializable summary of the heal agent's outcome that we pass
-// Between Workflow steps. The full HealOutcome contains agent transcript
-// Entries with unknown-typed tool args, which violate Rpc.Serializable
-// When crossing step boundaries. Transcript + unhealable details get
-// Persisted to the heal_session row inside the agent step.
+// Serializable summary that crosses Workflow step boundaries. The full
+// HealOutcome contains agent transcript entries with unknown-typed tool
+// args that violate Rpc.Serializable; transcript + unhealable details are
+// persisted to the heal_session row inside the agent step instead.
 type AgentStepSummary =
 	| { kind: 'fixed'; sourceTs: string; summary: string }
 	| { kind: 'unhealable'; category: UnhealableCategory; reason: string }
@@ -54,8 +53,6 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		const { workflowId, triggeringRunId } = event.payload;
 		const { env } = this;
 
-		// Step 1: open heal_session row. Wrapped in step.do so re-runs of
-		// Later steps don't double-insert.
 		const healSessionId = await step.do('create-heal-session', async () =>
 			withEnv(env, async () => {
 				const session = await createHealSession({ triggeringRunId, workflowId });
@@ -63,8 +60,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			})
 		);
 
-		// Step 2: capture the pre-heal source for diff computation in
-		// Failure branches. Reads only — safe to memoize.
+		// Captured pre-heal for diff computation in failure branches.
 		const previousSourceTs = await step.do('read-current-source', async () =>
 			withEnv(env, async () => {
 				const cur = await getCurrentVersion(workflowId);
@@ -72,10 +68,9 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			})
 		);
 
-		// Step 3: run the heal agent. Terminal branches (unhealable / failed /
-		// Abandoned) finalize the session row inline since we return from
-		// This step without doing a sweep/deploy. The transcript is persisted
-		// Inside the step so it never has to cross a step boundary.
+		// Terminal branches (unhealable / failed / abandoned) finalize the
+		// session row inline — the transcript is persisted here so it never
+		// has to cross a step boundary.
 		const agentSummary = await step.do(
 			'agent-heal',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
@@ -85,7 +80,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 					const transcript = agentEventsToTranscript(outcome.agentTranscript);
 
 					if (outcome.kind === 'fixed') {
-						// Leave session `running`; downstream steps finalize.
+						// Leave session `running`; downstream steps finalize it.
 						await updateHealSessionTranscript(healSessionId, transcript);
 						return {
 							kind: 'fixed',
@@ -111,7 +106,6 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 						};
 					}
 
-					// Failed | abandoned
 					await finishHealSession(healSessionId, {
 						agentTranscript: transcript,
 						diff: null,
@@ -142,7 +136,6 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 
 		const candidateSourceTs = agentSummary.sourceTs;
 
-		// Step 4: orchestrator-side authoritative test sweep.
 		const sweepResults = await step.do(
 			'test-sweep',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
@@ -181,9 +174,8 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			};
 		}
 
-		// Step 5: deploy + replay. The deploy step pulls the heal_session +
-		// HealOutcome again via fresh DB reads inside its callback so no
-		// Non-serializable data crosses the step boundary.
+		// Re-reads heal_session + HealOutcome inside the callback so no
+		// non-serializable data crosses the step boundary.
 		let deployedVersionId: string;
 		try {
 			deployedVersionId = await step.do(

@@ -55,10 +55,6 @@ export async function replayFailedEvents(workflowId: string): Promise<DispatchTa
 	});
 }
 
-// Run a newly-attached workflow against every historical event on its event
-// Source. Each event becomes an is_replay=true run for the new workflow, so
-// The workflow inherits the source's full history. Used when a user attaches
-// A parallel workflow to an existing source (graceful handover / A/B).
 export async function backfillWorkflow(workflowId: string): Promise<DispatchTally> {
 	const events = await listAllEventsForWorkflow(workflowId);
 	return dispatchAndTally(workflowId, events, (event) =>

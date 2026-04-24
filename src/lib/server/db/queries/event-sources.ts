@@ -45,8 +45,8 @@ export async function createEventSource(input: CreateEventSourceInput): Promise<
 	};
 }
 
-// System-level lookup (cron/webhook/executor). Does not enforce project_id —
-// Callers already trust the id. Prefer `getEventSourceForProject` in UI code paths.
+// System-level lookup — does not enforce project_id. Prefer
+// `getEventSourceForProject` in UI code paths.
 export async function getEventSource(id: string): Promise<EventSource | null> {
 	return fetchOne<EventSourceRow, EventSource>(
 		getDb().prepare(`SELECT * FROM event_sources WHERE id = ?`).bind(id)

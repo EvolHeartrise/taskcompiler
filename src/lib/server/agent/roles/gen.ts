@@ -12,12 +12,8 @@ export interface GenerateWorkflowOptions {
 	prompt: string;
 	model?: string;
 	onEvent?: (e: AgentEvent) => void;
-	/**
-	 * The workflow row must exist before generation starts (the /new form
-	 * action pre-inserts it so /w/[id] can render while gen is pending).
-	 * Pass the id here — the row's event_source_id is used to describe the
-	 * trigger in the user message.
-	 */
+	// Pre-condition: the workflow row must already exist (pre-inserted by the
+	// /new form action so /w/[id] can render while gen is pending).
 	workflowId: string;
 }
 

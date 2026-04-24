@@ -53,8 +53,7 @@ export const actions: Actions = {
 		} catch (err) {
 			return fail(500, { create: { error: errorMessage(err) } });
 		}
-		// The project layout writes the "last visited" cookie on entry, so we
-		// Just navigate.
+		// The project layout writes the "last visited" cookie on entry.
 		redirect(303, `/p/${newId}`);
 	},
 

@@ -98,12 +98,8 @@ function headerHas(init: RequestInit | undefined, name: string): boolean {
 	return Object.keys(h).some((k) => k.toLowerCase() === needle);
 }
 
-/**
- * Pull the project's secrets fresh per invocation. One D1 query per
- * workflow execution; `ctx.secret()` reads from the returned Map.
- * Rotating a secret in the UI takes effect on the very next invocation —
- * no redeploy needed.
- */
+// Pulled fresh per invocation (one D1 query per execution) so rotating a
+// secret in the UI takes effect on the very next invocation — no redeploy.
 export async function loadSecrets(env: WorkflowEnv): Promise<Map<string, string>> {
 	const res = await env.DB.prepare(`SELECT name, value FROM project_secrets WHERE project_id = ?`)
 		.bind(env.PROJECT_ID)

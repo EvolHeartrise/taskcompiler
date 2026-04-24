@@ -47,8 +47,8 @@ export async function getProjectForUser(id: string, userId: string): Promise<Pro
 	);
 }
 
-// System-level lookup. Used by ctx-rendering paths (e.g. WFP binding) where
-// The workflow id is already trusted. Prefer `getProjectForUser` in UI code.
+// System-level lookup — does not enforce user_id. Prefer
+// `getProjectForUser` in UI code.
 export async function getProject(id: string): Promise<Project | null> {
 	return fetchOne<ProjectRow, Project>(
 		getDb().prepare(`SELECT * FROM projects WHERE id = ?`).bind(id)
@@ -71,12 +71,6 @@ export async function renameProject(
 	return getProjectForUser(id, userId);
 }
 
-/**
- * Ensure the user has at least one project. Returns the user's existing
- * projects, or a freshly-minted default project if they had none. Called
- * lazily from hooks.server.ts so newly-signed-up users always land on a
- * usable project without needing a separate signup hook.
- */
 export async function ensureDefaultProject(userId: string): Promise<Project[]> {
 	const existing = await listProjectsForUser(userId);
 	if (existing.length > 0) {

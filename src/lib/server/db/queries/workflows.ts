@@ -43,8 +43,8 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 	};
 }
 
-// System-level lookup (cron/webhook/executor/heal). Does not enforce project_id;
-// Callers already trust the id. Prefer `getWorkflowForProject` in UI code paths.
+// System-level lookup — does not enforce project_id. Prefer
+// `getWorkflowForProject` in UI code paths.
 export async function getWorkflow(id: string): Promise<Workflow | null> {
 	return fetchOne<WorkflowRow, Workflow>(
 		getDb().prepare(`SELECT * FROM workflows WHERE id = ?`).bind(id)
@@ -76,8 +76,7 @@ export async function listWorkflowsForEventSource(eventSourceId: string): Promis
 	);
 }
 
-// Batched workflow counts per source for a project — one query instead of N
-// Per-source list lookups from the home loader.
+// One query instead of N per-source list lookups.
 export async function countWorkflowsBySourceForProject(
 	projectId: string
 ): Promise<Map<string, number>> {
@@ -125,14 +124,13 @@ export async function updateWorkflow(
 }
 
 export async function deleteWorkflow(id: string): Promise<boolean> {
-	// Ordered cascade for workflow-owned rows. Events are NOT owned by the
-	// Workflow anymore — they belong to the event_source — so we leave them
-	// Alone. The schema has several non-CASCADE FKs between child tables
+	// Events belong to the event_source, not the workflow, so they're left
+	// intact. The schema has several non-CASCADE FKs between child tables
 	// (heal_sessions → runs, workflow_versions → runs, versions → versions,
-	// Runs → runs) plus a circular ref workflows.current_version_id ↔
-	// Workflow_versions.workflow_id. We null the cross-child references
-	// First and then delete rows in an order that respects the remaining FKs,
-	// All as a single batched transaction so a mid-delete failure rolls back.
+	// runs → runs) plus a circular ref workflows.current_version_id ↔
+	// workflow_versions.workflow_id, so cross-child references are nulled
+	// first and rows are deleted in FK-safe order inside one batched
+	// transaction — a mid-delete failure rolls back.
 	const db = getDb();
 	const results = await db.batch([
 		db.prepare(`UPDATE workflows SET current_version_id = NULL WHERE id = ?`).bind(id),

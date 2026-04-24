@@ -45,8 +45,8 @@ async function fetchInstanceStatus(
 	}
 }
 
-// Project ownership is enforced by /p/[projectId]/+layout.server.ts. We still
-// Scope the workflow lookup by project so /p/A/w/[id-of-B-workflow] 404s.
+// Layout enforces project ownership; the workflow lookup is still scoped by
+// project so /p/A/w/[id-of-B-workflow] 404s rather than leaking.
 export const load: PageServerLoad = async ({ params, url }) => {
 	const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
 	if (!workflow) {

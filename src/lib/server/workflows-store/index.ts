@@ -3,11 +3,9 @@ import { listVersions } from '$lib/server/db/queries/versions';
 import { errorMessage } from '$lib/server/util';
 import { type WfpBinding, deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 
-// Worker script names: lowercase alphanumeric + hyphens, max 63 chars.
-// Workflow IDs are UUIDv4 (36 chars) — `wf-${id}-v${n}` would exceed 63 with
-// Versions of 5+ digits, so we truncate to the first 12 hex chars. That keeps
-// Names ≤ 63 chars (`wf-` 3 + 12 + `-v` 2 + version digits) and is unique
-// Enough in practice given the workflow_id namespace.
+// Worker script names max out at 63 chars. With the 36-char UUIDv4 workflow
+// id, `wf-${id}-v${n}` would exceed that for 5+ digit versions, so we take
+// the first 12 hex chars — unique enough within a project's namespace.
 const WORKFLOW_ID_PREFIX_LEN = 12;
 
 function workflowIdSlug(workflowId: string): string {
@@ -22,10 +20,8 @@ export function testScriptName(workflowId: string, nonce: string): string {
 	return `test-${workflowIdSlug(workflowId)}-${nonce}`;
 }
 
-// PROJECT_ID is baked into every workflow script at upload time so the
-// Bootstrap can query `project_secrets WHERE project_id = ?` at runtime.
-// Never changes after creation; secret values live in D1 and are loaded
-// Lazily per invocation.
+// Baked in at upload so the bootstrap can query
+// `project_secrets WHERE project_id = ?` at runtime.
 export function projectIdBinding(projectId: string): WfpBinding {
 	return { name: 'PROJECT_ID', text: projectId, type: 'plain_text' };
 }
@@ -54,13 +50,9 @@ export interface TearDownResult {
 	dbDeleted: boolean;
 }
 
-/**
- * Delete a workflow and every artifact we own for it: every deployed WFP
- * script (one per version) plus the DB rows. WFP script deletes are best-
- * effort — a failed script delete is logged but does not block the DB
- * delete, since leaving a workflow row pointing at missing scripts is
- * worse than leaving orphan scripts (those can be cleaned up later).
- */
+// WFP script deletes are best-effort: a failed delete is logged but doesn't
+// block the DB delete, since a workflow row pointing at missing scripts is
+// worse than orphan scripts (which can be cleaned up later).
 export async function tearDownWorkflow(workflowId: string): Promise<TearDownResult> {
 	const versions = await listVersions(workflowId);
 	let scriptsDeleted = 0;

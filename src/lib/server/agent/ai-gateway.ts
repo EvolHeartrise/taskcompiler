@@ -1,8 +1,7 @@
 import { getEnv } from '$lib/server/env';
 import { truncate } from '$lib/server/util';
 
-// Neutral content-block / message / tool types used by the agent loop.
-// The wire format is Workers AI's OpenAI-compatible chat-completions endpoint,
+// Wire format is Workers AI's OpenAI-compatible chat-completions endpoint,
 // routed through AI Gateway for observability. Translation to/from OpenAI
 // shape happens inside this module so the loop stays format-agnostic.
 
@@ -54,8 +53,6 @@ export interface MessagesResponse {
 	stop_reason: StopReason;
 	usage: { input_tokens: number; output_tokens: number };
 }
-
-// ---- OpenAI-compat wire shapes (internal) ----
 
 interface OAIToolCall {
 	id: string;

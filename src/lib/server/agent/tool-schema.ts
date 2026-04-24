@@ -1,13 +1,9 @@
 import type { Tool, ToolCtx } from './tools';
 
-// Minimal schema for agent-callable tools. Translates to the JSON Schema
-// `input_schema` block the model sees, and to a runtime validator that
-// turns model-supplied input into the typed object `run` receives.
-//
-// Only covers what the agent roles actually use (strings, numbers with
-// optional defaults, string enums). Extend here if a future tool needs
-// anything richer — don't reach for a full JSON Schema validator unless
-// the current vocabulary genuinely isn't enough.
+// Only covers what the agent roles use (strings, numbers with optional
+// defaults, string enums). Extend here if a future tool needs something
+// richer — don't reach for a full JSON Schema validator until the current
+// vocabulary genuinely isn't enough.
 
 export interface StringField {
 	kind: 'string';
