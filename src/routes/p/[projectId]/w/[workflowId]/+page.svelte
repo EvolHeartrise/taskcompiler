@@ -3,7 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { PageProps } from './$types';
-	import type { Event, HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
+	import type { HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
 	import { deleteWorkflow, getInFlight, resumeWorkflow, triggerWorkflow } from './data.remote';
 	import LocalTime, { utcLabel } from '$lib/LocalTime.svelte';
 
@@ -28,11 +28,10 @@
 		return () => clearInterval(id);
 	});
 
-	type TabId = 'overview' | 'events' | 'failures' | 'healings' | 'code';
+	type TabId = 'overview' | 'events' | 'healings' | 'code';
 	const TABS: { id: TabId; label: string }[] = [
 		{ id: 'overview', label: 'Overview' },
-		{ id: 'events', label: 'Events & Runs' },
-		{ id: 'failures', label: 'Failures' },
+		{ id: 'events', label: 'Events' },
 		{ id: 'healings', label: 'Healings' },
 		{ id: 'code', label: 'Code' }
 	];
@@ -95,14 +94,80 @@
 	}
 
 	let expandedEvents = $state<Record<string, boolean>>({});
-	let expandedRuns = $state<Record<string, boolean>>({});
-	let expandedFailures = $state<Record<string, boolean>>({});
 	let expandedHeals = $state<Record<string, boolean>>({});
 	let transcriptOpen = $state<Record<string, boolean>>({});
 
 	function toggle(map: Record<string, boolean>, id: string): void {
 		map[id] = !map[id];
 	}
+
+	type EventStatus = 'ok' | 'failed' | 'running' | 'superseded' | 'none';
+	type EventFilter = 'all' | 'ok' | 'failed' | 'running' | 'none';
+
+	function runsForEvent(eventId: string): Run[] {
+		return data.runs
+			.filter((r) => r.eventId === eventId)
+			.slice()
+			.sort((a, b) => a.startedAt - b.startedAt);
+	}
+
+	function latestRunForEvent(eventId: string): Run | undefined {
+		const evRuns = runsForEvent(eventId);
+		if (evRuns.length === 0) return undefined;
+		// Prefer a non-superseded run; fall back to the most recent regardless.
+		const nonSuperseded = evRuns.filter((r) => r.status !== 'superseded');
+		const pool = nonSuperseded.length > 0 ? nonSuperseded : evRuns;
+		return pool.reduce((a, b) => (a.startedAt >= b.startedAt ? a : b));
+	}
+
+	function eventStatus(eventId: string): EventStatus {
+		const run = latestRunForEvent(eventId);
+		if (!run) return 'none';
+		return run.status as EventStatus;
+	}
+
+	function healForEvent(eventId: string): HealSession | undefined {
+		const evRuns = runsForEvent(eventId);
+		for (const r of evRuns) {
+			const h = data.heals.find((hs) => hs.triggeringRunId === r.id);
+			if (h) return h;
+		}
+		return undefined;
+	}
+
+	// Read `?status=` from URL to seed the filter; component-local reactive state
+	// beyond that so clicking chips doesn't round-trip through the loader.
+	const urlStatus = $derived(page.url.searchParams.get('status'));
+	let eventFilter = $state<EventFilter>('all');
+	$effect(() => {
+		const s = urlStatus;
+		if (s === 'ok' || s === 'failed' || s === 'running' || s === 'none' || s === 'all') {
+			eventFilter = s;
+		}
+	});
+
+	let eventStatusCounts = $derived.by(() => {
+		const c = { total: 0, ok: 0, failed: 0, running: 0, none: 0, healing: 0 };
+		for (const ev of data.events) {
+			c.total++;
+			const s = eventStatus(ev.id);
+			if (s === 'ok') c.ok++;
+			else if (s === 'failed') c.failed++;
+			else if (s === 'running') c.running++;
+			else if (s === 'none') c.none++;
+			if (healForEvent(ev.id)) c.healing++;
+		}
+		return c;
+	});
+
+	let filteredEvents = $derived.by(() => {
+		if (eventFilter === 'all') return data.events;
+		return data.events.filter((ev) => {
+			const s = eventStatus(ev.id);
+			if (eventFilter === 'none') return s === 'none';
+			return s === eventFilter;
+		});
+	});
 
 	let selectedVersionId = $derived(
 		page.url.searchParams.get('version') ?? data.currentVersion?.id ?? ''
@@ -113,18 +178,6 @@
 			data.currentVersion ??
 			null
 	);
-
-	function findHealForRun(runId: string): HealSession | undefined {
-		return data.heals.find((h) => h.triggeringRunId === runId);
-	}
-
-	function findRunForEvent(eventId: string): Run | undefined {
-		return data.runs.find((r) => r.eventId === eventId);
-	}
-
-	function findEvent(eventId: string): Event | undefined {
-		return data.events.find((e) => e.id === eventId);
-	}
 
 	let triggerResult = $state<Awaited<ReturnType<typeof triggerWorkflow>> | null>(null);
 	const resumeResult = $derived(resumeWorkflow.result);
@@ -212,7 +265,7 @@
 			)}
 		>
 			{t.label}
-			{#if t.id === 'failures' && data.stats.totalFailed > 0}
+			{#if t.id === 'events' && data.stats.totalFailed > 0}
 				<span class="tab-count">{data.stats.totalFailed}</span>
 			{/if}
 			{#if t.id === 'healings' && data.stats.totalHeals > 0}
@@ -420,179 +473,174 @@
 </dialog>
 
 {#if activeTab === 'events'}
-	<section class="split">
+	<section>
 		<div class="card">
-			<h2>Events <span class="muted small">({data.events.length})</span></h2>
+			<div class="events-head">
+				<div class="stat-chips">
+					<span class="stat-chip">
+						<span class="label">Total</span>
+						<span class="val">{eventStatusCounts.total}</span>
+					</span>
+					<span class="stat-chip ok">
+						<span class="label">OK</span>
+						<span class="val">{eventStatusCounts.ok}</span>
+					</span>
+					<span class="stat-chip failed">
+						<span class="label">Failed</span>
+						<span class="val">{eventStatusCounts.failed}</span>
+					</span>
+					<span class="stat-chip running">
+						<span class="label">Running</span>
+						<span class="val">{eventStatusCounts.running}</span>
+					</span>
+					<span class="stat-chip none">
+						<span class="label">No run</span>
+						<span class="val">{eventStatusCounts.none}</span>
+					</span>
+					{#if eventStatusCounts.healing > 0}
+						<span class="stat-chip">
+							<span class="label">Healing</span>
+							<span class="val">{eventStatusCounts.healing}</span>
+						</span>
+					{/if}
+				</div>
+				<div class="filter-bar">
+					{#each [{ id: 'all', label: 'All' }, { id: 'ok', label: 'OK' }, { id: 'failed', label: 'Failed' }, { id: 'running', label: 'Running' }, { id: 'none', label: 'No run' }] as f (f.id)}
+						<button
+							type="button"
+							class="filter-btn"
+							class:active={eventFilter === f.id}
+							onclick={() => (eventFilter = f.id as EventFilter)}
+						>
+							{f.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+
 			{#if data.events.length === 0}
 				<div class="muted small">No events yet. Fire the webhook or use Manual trigger.</div>
+			{:else if filteredEvents.length === 0}
+				<div class="muted small">No events match this filter.</div>
 			{:else}
 				<ul class="rows">
-					{#each data.events as ev (ev.id)}
-						{@const run = findRunForEvent(ev.id)}
+					{#each filteredEvents as ev (ev.id)}
+						{@const evRuns = runsForEvent(ev.id)}
+						{@const latest = latestRunForEvent(ev.id)}
+						{@const status = eventStatus(ev.id)}
+						{@const heal = healForEvent(ev.id)}
 						<li>
 							<button class="row-btn" type="button" onclick={() => toggle(expandedEvents, ev.id)}>
 								<div class="row-head">
 									<span class="mono">{shortId(ev.id)}</span>
 									<span class="chip small">{ev.triggerType}</span>
+									{#if status === 'none'}
+										<span class="badge superseded">no run</span>
+									{:else}
+										<span class="badge {status}">{status}</span>
+									{/if}
+									{#if heal}
+										<span class="chip small">heal {heal.status}</span>
+									{/if}
+									<span class="row-spacer"></span>
 									<span class="muted small"><LocalTime ms={ev.receivedAt} /></span>
 								</div>
 								<div class="row-body">
-									<code class="preview">{truncate(safeJson(ev.payload), 200)}</code>
+									{#if status === 'failed' && latest?.error}
+										<strong>{latest.error.name}</strong>:
+										<span class="muted">{truncate(latest.error.message, 160)}</span>
+									{:else if status === 'ok' && latest?.result !== null && latest?.result !== undefined}
+										<code class="preview">{truncate(safeJson(latest.result), 160)}</code>
+									{:else if status === 'none'}
+										<span class="muted small">awaiting run</span>
+									{:else}
+										<code class="preview">{truncate(safeJson(ev.payload), 160)}</code>
+									{/if}
 								</div>
 							</button>
 							{#if expandedEvents[ev.id]}
 								<div class="details">
 									<div class="kv"><span>event id</span><code>{ev.id}</code></div>
-									{#if run}
-										<div class="kv">
-											<span>latest run</span><code>{run.id}</code>
-											<span class="badge {run.status}">{run.status}</span>
-										</div>
+									{#if ev.dedupKey}
+										<div class="kv"><span>dedup key</span><code>{ev.dedupKey}</code></div>
 									{/if}
+
 									<div class="block">
 										<div class="label">payload</div>
 										<pre>{safeJson(ev.payload)}</pre>
 									</div>
-								</div>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</div>
 
-		<div class="card">
-			<h2>Runs <span class="muted small">({data.runs.length})</span></h2>
-			{#if data.runs.length === 0}
-				<div class="muted small">No runs yet.</div>
-			{:else}
-				<ul class="rows">
-					{#each data.runs as run (run.id)}
-						<li>
-							<button class="row-btn" type="button" onclick={() => toggle(expandedRuns, run.id)}>
-								<div class="row-head">
-									<span class="mono">{shortId(run.id)}</span>
-									<span class="badge {run.status}">{run.status}</span>
-									<span class="muted small"><LocalTime ms={run.startedAt} /></span>
-									<span class="muted small">· {duration(run.startedAt, run.finishedAt)}</span>
-									{#if run.isReplay}<span class="chip small">replay</span>{/if}
-								</div>
-								<div class="row-body muted small">
-									event {shortId(run.eventId)}
-								</div>
-							</button>
-							{#if expandedRuns[run.id]}
-								<div class="details">
-									<div class="kv"><span>run id</span><code>{run.id}</code></div>
-									<div class="kv"><span>event id</span><code>{run.eventId}</code></div>
-									<div class="kv"><span>version id</span><code>{run.versionId}</code></div>
-									{#if run.parentRunId}
-										<div class="kv"><span>parent run</span><code>{run.parentRunId}</code></div>
-									{/if}
-									{#if run.result !== null && run.result !== undefined}
-										<div class="block">
-											<div class="label">result</div>
-											<pre>{safeJson(run.result)}</pre>
-										</div>
-									{/if}
-									{#if run.error}
-										<div class="block">
-											<div class="label">error</div>
-											<pre>{run.error.name}: {run.error.message}
-{run.error.stack ?? ''}</pre>
-										</div>
-									{/if}
-									{#if run.logs && run.logs.length > 0}
-										<div class="block">
-											<div class="label">logs</div>
-											<pre>{run.logs
-													.map(
-														(l) =>
-															`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
-													)
-													.join('\n')}</pre>
-										</div>
-									{/if}
-								</div>
-							{/if}
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</div>
-	</section>
-{/if}
+									<div class="block">
+										<div class="label">runs ({evRuns.length})</div>
+										{#if evRuns.length === 0}
+											<div class="muted small">No runs yet for this event.</div>
+										{:else}
+											<ul class="inner-rows">
+												{#each evRuns as r (r.id)}
+													<li>
+														<div class="row-head">
+															<span class="mono">{shortId(r.id)}</span>
+															<span class="badge {r.status}">{r.status}</span>
+															<span class="muted small"
+																>· {duration(r.startedAt, r.finishedAt)}</span
+															>
+															<span class="muted small">· <LocalTime ms={r.startedAt} /></span>
+															{#if r.isReplay}<span class="chip small">replay</span>{/if}
+														</div>
+														<div class="inner-kv">
+															<div class="kv"><span>run id</span><code>{r.id}</code></div>
+															<div class="kv">
+																<span>version id</span><code>{r.versionId}</code>
+															</div>
+															{#if r.parentRunId}
+																<div class="kv">
+																	<span>parent run</span><code>{r.parentRunId}</code>
+																</div>
+															{/if}
+															{#if r.result !== null && r.result !== undefined}
+																<div class="block">
+																	<div class="label">result</div>
+																	<pre>{safeJson(r.result)}</pre>
+																</div>
+															{/if}
+															{#if r.error}
+																<div class="block">
+																	<div class="label">error</div>
+																	<pre>{r.error.name}: {r.error.message}
+{r.error.stack ?? ''}</pre>
+																</div>
+															{/if}
+															{#if r.logs && r.logs.length > 0}
+																<div class="block">
+																	<div class="label">logs</div>
+																	<pre>{r.logs
+																			.map(
+																				(l) =>
+																					`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
+																			)
+																			.join('\n')}</pre>
+																</div>
+															{/if}
+														</div>
+													</li>
+												{/each}
+											</ul>
+										{/if}
+									</div>
 
-{#if activeTab === 'failures'}
-	<section>
-		<div class="card">
-			<h2>Failed runs <span class="muted small">({data.failedRuns.length})</span></h2>
-			{#if data.failedRuns.length === 0}
-				<div class="muted small">No failures 🎉</div>
-			{:else}
-				<ul class="rows">
-					{#each data.failedRuns as run (run.id)}
-						{@const heal = findHealForRun(run.id)}
-						<li>
-							<button
-								class="row-btn"
-								type="button"
-								onclick={() => toggle(expandedFailures, run.id)}
-							>
-								<div class="row-head">
-									<span class="mono">{shortId(run.id)}</span>
-									<span class="badge failed">failed</span>
-									<span class="muted small"><LocalTime ms={run.startedAt} /></span>
-								</div>
-								<div class="row-body">
-									{#if run.error}
-										<strong>{run.error.name}</strong>:
-										<span class="muted">{truncate(run.error.message, 160)}</span>
-									{/if}
 									{#if heal}
-										<span class="chip small">heal {heal.status}</span>
-									{/if}
-								</div>
-							</button>
-							{#if expandedFailures[run.id]}
-								<div class="details">
-									<div class="kv"><span>run id</span><code>{run.id}</code></div>
-									<div class="kv"><span>event id</span><code>{run.eventId}</code></div>
-									{#if heal}
-										<div class="kv">
-											<span>heal session</span>
-											<a
-												href={resolve(
-													`/p/[projectId]/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/p/[projectId]/w/[workflowId]?${string}`,
-													{ projectId, workflowId: data.workflow.id }
-												)}><code>{heal.id}</code></a
-											>
-											<span class="badge {heal.status}">{heal.status}</span>
-										</div>
-									{/if}
-									{#if run.error}
 										<div class="block">
-											<div class="label">error</div>
-											<pre>{run.error.name}: {run.error.message}
-
-{run.error.stack ?? ''}</pre>
-										</div>
-									{/if}
-									{#if run.logs && run.logs.length > 0}
-										<div class="block">
-											<div class="label">logs</div>
-											<pre>{run.logs
-													.map(
-														(l) =>
-															`[${new Date(l.ts).toISOString()}] ${l.level.toUpperCase()} ${l.message}${l.data !== undefined ? ' ' + safeJson(l.data) : ''}`
-													)
-													.join('\n')}</pre>
-										</div>
-									{/if}
-									{#if findEvent(run.eventId)}
-										<div class="block">
-											<div class="label">event payload</div>
-											<pre>{safeJson(findEvent(run.eventId)?.payload)}</pre>
+											<div class="label">heal session</div>
+											<div class="kv">
+												<span>id</span>
+												<a
+													href={resolve(
+														`/p/[projectId]/w/[workflowId]?${tabQuery('healings', { heal: heal.id })}` as `/p/[projectId]/w/[workflowId]?${string}`,
+														{ projectId, workflowId: data.workflow.id }
+													)}><code>{heal.id}</code></a
+												>
+												<span class="badge {heal.status}">{heal.status}</span>
+											</div>
 										</div>
 									{/if}
 								</div>
@@ -958,11 +1006,6 @@
 	.dialog-actions .btn.danger:not(:disabled):hover {
 		background: #991b1b;
 		border-color: #991b1b;
-	}
-	.split {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 16px;
 	}
 	.card {
 		background: #fff;
@@ -1332,9 +1375,123 @@
 	.code :global(pre code) {
 		font-family: inherit;
 	}
+	.events-head {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		margin-bottom: 12px;
+	}
+	.stat-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+	.stat-chip {
+		display: inline-flex;
+		align-items: baseline;
+		gap: 6px;
+		padding: 4px 10px;
+		border-radius: 999px;
+		background: #f1f5f9;
+		color: #334155;
+		font-size: 12px;
+		font-weight: 500;
+	}
+	.stat-chip .label {
+		color: #64748b;
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		font-size: 10.5px;
+	}
+	.stat-chip .val {
+		font-weight: 700;
+		color: #0f172a;
+	}
+	.stat-chip.ok {
+		background: #dcfce7;
+		color: #166534;
+	}
+	.stat-chip.ok .label {
+		color: #15803d;
+	}
+	.stat-chip.ok .val {
+		color: #14532d;
+	}
+	.stat-chip.failed {
+		background: #fee2e2;
+		color: #991b1b;
+	}
+	.stat-chip.failed .label {
+		color: #b91c1c;
+	}
+	.stat-chip.failed .val {
+		color: #7f1d1d;
+	}
+	.stat-chip.running {
+		background: #fef3c7;
+		color: #92400e;
+	}
+	.stat-chip.running .label {
+		color: #b45309;
+	}
+	.stat-chip.running .val {
+		color: #78350f;
+	}
+	.stat-chip.none {
+		background: #e5e7eb;
+		color: #4b5563;
+	}
+	.filter-bar {
+		display: inline-flex;
+		flex-wrap: wrap;
+		gap: 4px;
+		padding: 3px;
+		background: #f1f5f9;
+		border-radius: 8px;
+		align-self: flex-start;
+	}
+	.filter-btn {
+		padding: 5px 12px;
+		border: none;
+		background: transparent;
+		color: #475569;
+		border-radius: 6px;
+		font: inherit;
+		font-size: 12.5px;
+		cursor: pointer;
+	}
+	.filter-btn:hover {
+		color: #0f172a;
+	}
+	.filter-btn.active {
+		background: #0f172a;
+		color: #fff;
+		font-weight: 600;
+	}
+	.row-spacer {
+		flex: 1;
+	}
+	.inner-rows {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.inner-rows > li {
+		border: 1px solid #e5e7eb;
+		border-radius: 4px;
+		padding: 8px 10px;
+		background: #fff;
+	}
+	.inner-kv {
+		margin-top: 6px;
+		padding-top: 6px;
+		border-top: 1px dashed #e5e7eb;
+	}
 	@media (max-width: 900px) {
-		.grid,
-		.split {
+		.grid {
 			grid-template-columns: 1fr;
 		}
 		.stats {
