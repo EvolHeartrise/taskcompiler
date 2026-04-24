@@ -122,13 +122,31 @@ export async function runHealTestSweep(
 	}
 
 	const historicalEvents = await listAllEventsForWorkflow(db, workflowId);
+	log.info(EVENTS.HEAL_SWEEP_START, {
+		workflow_id: workflowId,
+		total_events: historicalEvents.length
+	});
 	const details: HealTestResultDetail[] = [];
 	let passed = 0;
 	let failed = 0;
 	let abortedEarly = false;
 
-	for (const event of historicalEvents) {
+	for (let i = 0; i < historicalEvents.length; i++) {
+		const event = historicalEvents[i]!;
+		log.info(EVENTS.HEAL_SWEEP_EVENT_START, {
+			workflow_id: workflowId,
+			event_id: event.id,
+			event_index: i,
+			total_events: historicalEvents.length
+		});
 		const res = await runAgainstEventEphemeral(env, sourceTs, event, workflow);
+		log.info(EVENTS.HEAL_SWEEP_EVENT_DONE, {
+			workflow_id: workflowId,
+			event_id: event.id,
+			event_index: i,
+			ok: res.ok,
+			duration_ms: res.durationMs
+		});
 		const detail: HealTestResultDetail = { eventId: event.id, ok: res.ok };
 		if (!res.ok && res.error) {
 			detail.error = res.error;
@@ -145,6 +163,13 @@ export async function runHealTestSweep(
 		}
 	}
 
+	log.info(EVENTS.HEAL_SWEEP_END, {
+		workflow_id: workflowId,
+		passed,
+		failed,
+		aborted_early: abortedEarly,
+		total: historicalEvents.length
+	});
 	return {
 		abortedEarly,
 		results: {
