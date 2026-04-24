@@ -47,6 +47,7 @@
 	);
 	let isOnNewSource = $derived(page.url.pathname.endsWith('/sources/new'));
 	let isOnSecrets = $derived(page.url.pathname.endsWith('/secrets'));
+	let isOnMembers = $derived(page.url.pathname.endsWith('/members'));
 	let isOnProjects = $derived(page.url.pathname.startsWith('/projects'));
 
 	function sourceTriggerLabel(t: string): string {
@@ -119,6 +120,13 @@
 							class:active={isOnSecrets}
 						>
 							Secrets
+						</a>
+						<a
+							href={resolve('/p/[projectId]/members', { projectId: activeProjectId })}
+							class="nav-link"
+							class:active={isOnMembers}
+						>
+							Members
 						</a>
 					</nav>
 
