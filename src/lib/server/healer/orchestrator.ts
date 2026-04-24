@@ -1,9 +1,6 @@
 import { type DispatchTally, replayFailedEvents } from '$lib/server/engine/replay';
-import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { getDb } from '$lib/server/db';
-import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion, getCurrentVersion } from '$lib/server/db/queries/versions';
-import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { finishHealSession, getHealSession } from '$lib/server/db/queries/heal-sessions';
 import { writeVersion } from '$lib/server/workflows-store';
 import { createLogger } from '$lib/server/log';
@@ -12,18 +9,12 @@ import { errorMessage } from '$lib/server/util';
 
 const log = createLogger('healer');
 import type { AgentEvent } from '$lib/server/agent/loop';
-import type {
-	HealAgentTranscriptEntry,
-	HealTestResultDetail,
-	HealTestResults
-} from '$lib/server/db/types';
+import type { HealAgentTranscriptEntry, HealTestResults } from '$lib/server/db/types';
 
-const EARLY_OUT_FAIL_THRESHOLD = 5;
-
-export interface HealSweepResult {
-	results: HealTestResults;
-	abortedEarly: boolean;
-}
+// Exported so heal-flow.ts can preserve the same abort magnitude when the
+// sweep now runs as a loop of per-event step.do calls at the Workflow top
+// level.
+export const HEAL_SWEEP_ABORT_THRESHOLD = 5;
 
 export interface DeployHealedVersionResult {
 	newVersionId: string;
@@ -106,79 +97,6 @@ export function computeDiff(oldSource: string, newSource: string): string {
 		j++;
 	}
 	return lines.join('\n');
-}
-
-// Bails after EARLY_OUT_FAIL_THRESHOLD failures — each iteration deploys,
-// invokes, and tears down a temp WFP script. Persists nothing.
-export async function runHealTestSweep(
-	env: Env,
-	workflowId: string,
-	sourceTs: string
-): Promise<HealSweepResult> {
-	const db = getDb(env);
-	const workflow = await getWorkflow(db, workflowId);
-	if (!workflow) {
-		throw new Error(`runHealTestSweep: workflow not found: ${workflowId}`);
-	}
-
-	const historicalEvents = await listAllEventsForWorkflow(db, workflowId);
-	log.info(EVENTS.HEAL_SWEEP_START, {
-		workflow_id: workflowId,
-		total_events: historicalEvents.length
-	});
-	const details: HealTestResultDetail[] = [];
-	let passed = 0;
-	let failed = 0;
-	let abortedEarly = false;
-
-	for (let i = 0; i < historicalEvents.length; i++) {
-		const event = historicalEvents[i]!;
-		log.info(EVENTS.HEAL_SWEEP_EVENT_START, {
-			workflow_id: workflowId,
-			event_id: event.id,
-			event_index: i,
-			total_events: historicalEvents.length
-		});
-		const res = await runAgainstEventEphemeral(env, sourceTs, event, workflow);
-		log.info(EVENTS.HEAL_SWEEP_EVENT_DONE, {
-			workflow_id: workflowId,
-			event_id: event.id,
-			event_index: i,
-			ok: res.ok,
-			duration_ms: res.durationMs
-		});
-		const detail: HealTestResultDetail = { eventId: event.id, ok: res.ok };
-		if (!res.ok && res.error) {
-			detail.error = res.error;
-		}
-		details.push(detail);
-		if (res.ok) {
-			passed += 1;
-		} else {
-			failed += 1;
-		}
-		if (failed >= EARLY_OUT_FAIL_THRESHOLD) {
-			abortedEarly = true;
-			break;
-		}
-	}
-
-	log.info(EVENTS.HEAL_SWEEP_END, {
-		workflow_id: workflowId,
-		passed,
-		failed,
-		aborted_early: abortedEarly,
-		total: historicalEvents.length
-	});
-	return {
-		abortedEarly,
-		results: {
-			details,
-			failed,
-			passed,
-			total: historicalEvents.length
-		}
-	};
 }
 
 // The agent transcript is expected to have already been persisted to the
