@@ -118,13 +118,37 @@ export function buildCtx(
 	secrets: Map<string, string>
 ): Ctx {
 	const workflowId = body.workflow.id;
+	const eventId = body.event.id;
 
 	const log: Ctx['log'] = (level, message, data) => {
 		const entry: LogEntry = { level, message, ts: Date.now() };
 		if (data !== undefined) {
 			entry.data = data;
 		}
+		// Preserve the logs_json persistence path (the user-script UI renders
+		// from this array) AND mirror to the Workers Observability stream
+		// as one structured JSON line. `source: 'user-script'` is the filter
+		// hook for the docs/logging.md "find a specific workflow's logs" recipe.
 		logs.push(entry);
+		const envelope = {
+			source: 'user-script',
+			level,
+			ts: entry.ts,
+			workflow_id: workflowId,
+			event_id: eventId,
+			message,
+			...(data !== undefined ? { data } : {})
+		};
+		const line = JSON.stringify(envelope);
+		if (level === 'error') {
+			console.error(line);
+		} else if (level === 'warn') {
+			console.warn(line);
+		} else if (level === 'debug') {
+			console.debug(line);
+		} else {
+			console.log(line);
+		}
 	};
 
 	const instrumentedFetch = async (input: string | URL, init?: RequestInit): Promise<Response> => {
