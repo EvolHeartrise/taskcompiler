@@ -1,7 +1,7 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { withEnv } from '$lib/server/env';
 import { generateWorkflow } from '$lib/server/agent/roles/gen';
-import { type BackfillResult, backfillWorkflow } from '$lib/server/engine';
+import { type DispatchTally, backfillWorkflow } from '$lib/server/engine';
 import { errorMessage } from '$lib/server/util';
 
 export interface GenWorkflowParams {
@@ -21,7 +21,7 @@ export interface GenWorkflowResult {
 	workflowId: string;
 	versionId: string;
 	sourceTs: string;
-	backfill?: BackfillResult;
+	backfill?: DispatchTally;
 }
 
 export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowParams> {
@@ -55,12 +55,12 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 		}
 
 		// Backfill is best-effort — individual run failures are captured in the
-		// BackfillResult and do not abort the workflow. We also tolerate the
+		// DispatchTally and do not abort the workflow. We also tolerate the
 		// Entire backfill throwing: the workflow is deployed either way.
 		const backfill = await step.do(
 			'backfill',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
-			async (): Promise<BackfillResult | null> =>
+			async (): Promise<DispatchTally | null> =>
 				withEnv(env, async () => {
 					try {
 						return await backfillWorkflow(params.workflowId);

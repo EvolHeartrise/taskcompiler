@@ -1,4 +1,4 @@
-import { type ReplayResult, replayFailedEvents } from '$lib/server/engine/replay';
+import { type DispatchTally, replayFailedEvents } from '$lib/server/engine/replay';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion, getCurrentVersion } from '$lib/server/db/queries/versions';
@@ -24,7 +24,7 @@ export interface DeployHealedVersionResult {
 	newVersionId: string;
 	versionNumber: number;
 	deployPath: string;
-	replay: ReplayResult | null;
+	replay: DispatchTally | null;
 }
 
 export function agentEventsToTranscript(events: AgentEvent[]): HealAgentTranscriptEntry[] {
@@ -206,7 +206,7 @@ export async function deployHealedVersion(args: {
 		testResults: sweep
 	});
 
-	let replay: ReplayResult | null = null;
+	let replay: DispatchTally | null = null;
 	try {
 		replay = await replayFailedEvents(workflowId);
 	} catch (error) {

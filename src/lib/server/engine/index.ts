@@ -11,4 +11,4 @@ export type {
 	WorkflowDispatchResult
 } from './executor';
 export { backfillWorkflow, replayFailedEvents } from './replay';
-export type { BackfillResult, ReplayResult } from './replay';
+export type { DispatchTally } from './replay';

@@ -11,14 +11,10 @@ export interface DispatchTally {
 	runIds: string[];
 }
 
-export type ReplayResult = DispatchTally;
-export type BackfillResult = DispatchTally;
-
 async function dispatchAndTally<T>(
 	workflowId: string,
 	items: T[],
-	dispatch: (item: T) => Promise<ExecuteResult>,
-	onThrow?: (item: T, error: unknown) => void
+	dispatch: (item: T) => Promise<ExecuteResult>
 ): Promise<DispatchTally> {
 	const result: DispatchTally = {
 		attempted: 0,
@@ -38,17 +34,17 @@ async function dispatchAndTally<T>(
 				result.failed += 1;
 			}
 		} catch (error) {
-			if (!onThrow) {
-				throw error;
-			}
-			onThrow(item, error);
 			result.failed += 1;
+			console.error('[dispatchAndTally] dispatch threw', {
+				error: errorMessage(error),
+				workflowId
+			});
 		}
 	}
 	return result;
 }
 
-export async function replayFailedEvents(workflowId: string): Promise<ReplayResult> {
+export async function replayFailedEvents(workflowId: string): Promise<DispatchTally> {
 	const failed = await listFailedRunsByEvent(workflowId);
 	return dispatchAndTally(workflowId, failed, async (old) => {
 		await markRunSuperseded(old.id);
@@ -63,18 +59,9 @@ export async function replayFailedEvents(workflowId: string): Promise<ReplayResu
 // Source. Each event becomes an is_replay=true run for the new workflow, so
 // The workflow inherits the source's full history. Used when a user attaches
 // A parallel workflow to an existing source (graceful handover / A/B).
-export async function backfillWorkflow(workflowId: string): Promise<BackfillResult> {
+export async function backfillWorkflow(workflowId: string): Promise<DispatchTally> {
 	const events = await listAllEventsForWorkflow(workflowId);
-	return dispatchAndTally(
-		workflowId,
-		events,
-		(event) => executeExistingEventForWorkflow(event.id, workflowId, { isReplay: true }),
-		(event, error) => {
-			console.error('[backfill] dispatch threw', {
-				error: errorMessage(error),
-				eventId: event.id,
-				workflowId
-			});
-		}
+	return dispatchAndTally(workflowId, events, (event) =>
+		executeExistingEventForWorkflow(event.id, workflowId, { isReplay: true })
 	);
 }
