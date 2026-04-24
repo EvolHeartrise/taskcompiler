@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { ingestWebhookEvent } from '$lib/server/webhooks/ingest';
 import type { ExecuteSourceEventResult } from '$lib/server/engine';
+import { errorMessage } from '$lib/server/util';
 
 function errorJson(status: number, message: string): Response {
 	return json({ error: { message, name: 'TriggerError' } }, { status });
@@ -46,7 +47,7 @@ function fanoutResponse(res: ExecuteSourceEventResult): Response {
 			dispatched: res.dispatched.map((d) => ({
 				error: d.error ?? null,
 				result: d.result ?? null,
-				runId: d.runId || null,
+				runId: d.runId,
 				skipped: d.skipped ?? null,
 				status: d.status,
 				workflowId: d.workflowId
@@ -85,11 +86,7 @@ async function handle(
 		});
 		return fanoutResponse(res);
 	} catch (error) {
-		const e = error as Error;
-		return json(
-			{ error: { message: e.message ?? String(error), name: e.name ?? 'Error' } },
-			{ status: 500 }
-		);
+		return errorJson(500, errorMessage(error));
 	}
 }
 
