@@ -1,5 +1,4 @@
-import type { Response as CfResponse } from '@cloudflare/workers-types';
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 import type { EventTriggerType, RunError, RunLogEntry } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
 import { classifyInfraFailure } from './run-error';
@@ -29,8 +28,7 @@ export async function invokeDispatcher(args: {
 	event: DispatchEvent;
 	workflow: { id: string; name: string };
 }): Promise<InvokeOutcome> {
-	const env = getEnv();
-	let response: CfResponse;
+	let response: Response;
 	try {
 		response = await env.DISPATCHER.get(args.scriptName).fetch('https://workflow.invoke/', {
 			body: JSON.stringify({

@@ -6,7 +6,7 @@ import {
 } from '$lib/server/db/queries/event-sources';
 import { countEventsForSource } from '$lib/server/db/queries/events';
 import { createWorkflow } from '$lib/server/db/queries/workflows';
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 import { errorMessage } from '$lib/server/util';
 
 export const load: PageServerLoad = async ({ params, url }) => {
@@ -83,7 +83,7 @@ export const actions: Actions = {
 		}
 
 		try {
-			await getEnv().GEN_WORKFLOW.create({
+			await env.GEN_WORKFLOW.create({
 				id: `gen-${workflowId}`,
 				params: {
 					backfill,

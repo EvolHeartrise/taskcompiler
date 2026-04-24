@@ -4,7 +4,6 @@
 // to it (committed to git) provides the types that TS uses.
 
 import sveltekitWorker from '../.svelte-kit/cloudflare/_worker.js';
-import { withEnv } from '$lib/server/env';
 import { handleCronTick } from '$lib/server/triggers/cron-handler';
 
 export { GenerateWorkflowFlow } from '$lib/server/workflows/gen-flow';
@@ -12,9 +11,9 @@ export { HealWorkflowFlow } from '$lib/server/workflows/heal-flow';
 
 export default {
 	fetch: sveltekitWorker.fetch.bind(sveltekitWorker),
-	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+	async scheduled(controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
 		ctx.waitUntil(
-			withEnv(env, async () => {
+			(async () => {
 				try {
 					const result = await handleCronTick(controller.scheduledTime);
 					console.log(
@@ -23,7 +22,7 @@ export default {
 				} catch (err) {
 					console.error('[cron] handleCronTick threw', err);
 				}
-			})
+			})()
 		);
 	}
 } satisfies ExportedHandler<Env>;

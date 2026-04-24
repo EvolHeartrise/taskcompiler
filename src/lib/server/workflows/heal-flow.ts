@@ -1,5 +1,4 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
-import { withEnv } from '$lib/server/env';
 import { healWorkflow } from '$lib/server/agent/roles/heal';
 import {
 	agentEventsToTranscript,
@@ -51,22 +50,17 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		step: WorkflowStep
 	): Promise<HealWorkflowResult> {
 		const { workflowId, triggeringRunId } = event.payload;
-		const { env } = this;
 
-		const healSessionId = await step.do('create-heal-session', async () =>
-			withEnv(env, async () => {
-				const session = await createHealSession({ triggeringRunId, workflowId });
-				return session.id;
-			})
-		);
+		const healSessionId = await step.do('create-heal-session', async () => {
+			const session = await createHealSession({ triggeringRunId, workflowId });
+			return session.id;
+		});
 
 		// Captured pre-heal for diff computation in failure branches.
-		const previousSourceTs = await step.do('read-current-source', async () =>
-			withEnv(env, async () => {
-				const cur = await getCurrentVersion(workflowId);
-				return cur?.sourceTs ?? null;
-			})
-		);
+		const previousSourceTs = await step.do('read-current-source', async () => {
+			const cur = await getCurrentVersion(workflowId);
+			return cur?.sourceTs ?? null;
+		});
 
 		// Terminal branches (unhealable / failed / abandoned) finalize the
 		// session row inline — the transcript is persisted here so it never
@@ -74,47 +68,46 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		const agentSummary = await step.do(
 			'agent-heal',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
-			async (): Promise<AgentStepSummary> =>
-				withEnv(env, async () => {
-					const outcome = await healWorkflow({ triggeringRunId, workflowId });
-					const transcript = agentEventsToTranscript(outcome.agentTranscript);
+			async (): Promise<AgentStepSummary> => {
+				const outcome = await healWorkflow({ triggeringRunId, workflowId });
+				const transcript = agentEventsToTranscript(outcome.agentTranscript);
 
-					if (outcome.kind === 'fixed') {
-						// Leave session `running`; downstream steps finalize it.
-						await updateHealSessionTranscript(healSessionId, transcript);
-						return {
-							kind: 'fixed',
-							sourceTs: outcome.sourceTs,
-							summary: outcome.summary
-						};
-					}
+				if (outcome.kind === 'fixed') {
+					// Leave session `running`; downstream steps finalize it.
+					await updateHealSessionTranscript(healSessionId, transcript);
+					return {
+						kind: 'fixed',
+						sourceTs: outcome.sourceTs,
+						summary: outcome.summary
+					};
+				}
 
-					if (outcome.kind === 'unhealable') {
-						await finishHealSession(healSessionId, {
-							agentTranscript: transcript,
-							diff: null,
-							newVersionId: null,
-							status: 'needs_attention',
-							testResults: null,
-							unhealableCategory: outcome.category,
-							unhealableReason: outcome.reason
-						});
-						return {
-							category: outcome.category,
-							kind: 'unhealable',
-							reason: outcome.reason
-						};
-					}
-
+				if (outcome.kind === 'unhealable') {
 					await finishHealSession(healSessionId, {
 						agentTranscript: transcript,
 						diff: null,
 						newVersionId: null,
-						status: outcome.kind,
-						testResults: null
+						status: 'needs_attention',
+						testResults: null,
+						unhealableCategory: outcome.category,
+						unhealableReason: outcome.reason
 					});
-					return { kind: outcome.kind, reason: outcome.reason };
-				})
+					return {
+						category: outcome.category,
+						kind: 'unhealable',
+						reason: outcome.reason
+					};
+				}
+
+				await finishHealSession(healSessionId, {
+					agentTranscript: transcript,
+					diff: null,
+					newVersionId: null,
+					status: outcome.kind,
+					testResults: null
+				});
+				return { kind: outcome.kind, reason: outcome.reason };
+			}
 		);
 
 		if (agentSummary.kind === 'unhealable') {
@@ -139,32 +132,28 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		const sweepResults = await step.do(
 			'test-sweep',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
-			async (): Promise<HealTestResults & { abortedEarly: boolean }> =>
-				withEnv(env, async () => {
-					const sweep = await runHealTestSweep(workflowId, candidateSourceTs);
-					return { ...sweep.results, abortedEarly: sweep.abortedEarly };
-				})
+			async (): Promise<HealTestResults & { abortedEarly: boolean }> => {
+				const sweep = await runHealTestSweep(workflowId, candidateSourceTs);
+				return { ...sweep.results, abortedEarly: sweep.abortedEarly };
+			}
 		);
 
 		if (sweepResults.failed > 0) {
-			await step.do('finish-session-sweep-failed', async () =>
-				withEnv(env, async () => {
-					await finishHealSession(healSessionId, {
-						agentTranscript: null,
-						diff:
-							previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
-						newVersionId: null,
-						status: 'failed',
-						testResults: {
-							details: sweepResults.details,
-							failed: sweepResults.failed,
-							passed: sweepResults.passed,
-							total: sweepResults.total
-						}
-					});
-					return { ok: true };
-				})
-			);
+			await step.do('finish-session-sweep-failed', async () => {
+				await finishHealSession(healSessionId, {
+					agentTranscript: null,
+					diff: previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
+					newVersionId: null,
+					status: 'failed',
+					testResults: {
+						details: sweepResults.details,
+						failed: sweepResults.failed,
+						passed: sweepResults.passed,
+						total: sweepResults.total
+					}
+				});
+				return { ok: true };
+			});
 			return {
 				healSessionId,
 				reason: sweepResults.abortedEarly
@@ -181,43 +170,39 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			deployedVersionId = await step.do(
 				'deploy-and-replay',
 				{ retries: { delay: '5 seconds', limit: 2 }, timeout: '5 minutes' },
-				async (): Promise<string> =>
-					withEnv(env, async () => {
-						const result = await deployHealedVersion({
-							healSessionId,
-							sourceTs: candidateSourceTs,
-							sweep: {
-								details: sweepResults.details,
-								failed: sweepResults.failed,
-								passed: sweepResults.passed,
-								total: sweepResults.total
-							},
-							triggeringRunId,
-							workflowId
-						});
-						return result.newVersionId;
-					})
-			);
-		} catch (error) {
-			const message = errorMessage(error);
-			await step.do('finish-session-deploy-failed', async () =>
-				withEnv(env, async () => {
-					await finishHealSession(healSessionId, {
-						agentTranscript: null,
-						diff:
-							previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
-						newVersionId: null,
-						status: 'failed',
-						testResults: {
+				async (): Promise<string> => {
+					const result = await deployHealedVersion({
+						healSessionId,
+						sourceTs: candidateSourceTs,
+						sweep: {
 							details: sweepResults.details,
 							failed: sweepResults.failed,
 							passed: sweepResults.passed,
 							total: sweepResults.total
-						}
+						},
+						triggeringRunId,
+						workflowId
 					});
-					return { ok: true };
-				})
+					return result.newVersionId;
+				}
 			);
+		} catch (error) {
+			const message = errorMessage(error);
+			await step.do('finish-session-deploy-failed', async () => {
+				await finishHealSession(healSessionId, {
+					agentTranscript: null,
+					diff: previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
+					newVersionId: null,
+					status: 'failed',
+					testResults: {
+						details: sweepResults.details,
+						failed: sweepResults.failed,
+						passed: sweepResults.passed,
+						total: sweepResults.total
+					}
+				});
+				return { ok: true };
+			});
 			return {
 				healSessionId,
 				reason: `deploy threw: ${message}`,

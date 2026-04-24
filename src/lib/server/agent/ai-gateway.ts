@@ -1,4 +1,4 @@
-import { getEnv } from '$lib/server/env';
+import { env } from 'cloudflare:workers';
 import { truncate } from '$lib/server/util';
 
 // Wire format is Workers AI's OpenAI-compatible chat-completions endpoint,
@@ -219,7 +219,6 @@ export async function createMessage(
 	body: MessagesRequest,
 	opts?: { signal?: AbortSignal }
 ): Promise<MessagesResponse> {
-	const env = getEnv();
 	const cfToken = env.CLOUDFLARE_API_TOKEN;
 	const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 	const gatewayName = env.CLOUDFLARE_GATEWAY_NAME;
