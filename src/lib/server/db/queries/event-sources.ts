@@ -1,4 +1,5 @@
-import { getDb, mapRow, now, uuid } from '../index.ts';
+import { getDb, now, uuid } from '../index.ts';
+import { mapRow } from '../mappers.ts';
 import type { EventSource, TriggerType } from '../types.ts';
 
 interface EventSourceRow {

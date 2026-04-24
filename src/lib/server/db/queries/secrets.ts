@@ -1,4 +1,5 @@
-import { getDb, mapRow, now } from '../index.ts';
+import { getDb, now } from '../index.ts';
+import { mapRow } from '../mappers.ts';
 import type { ProjectSecretMeta } from '../types.ts';
 
 interface ProjectSecretMetaRow {
