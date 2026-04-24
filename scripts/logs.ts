@@ -49,9 +49,21 @@
 //
 // OUTPUT:
 //   Each JSONL line is the raw log event, e.g.
-//     {"level":"info","ts":...,"context":"executor","event":"run.started",
+//     {"ts":...,"level":"info","context":"executor","event":"run.started",
 //      "run_id":"...","workflow_id":"...",...}
 //   Pretty format collapses to "<iso>  <level>  <event>  key=v ..." lines.
+//
+// FIELD MODEL:
+//   Structured lines emitted by src/lib/server/log.ts are visible in results
+//   under `source.*` (our logger fields: level, context, event, run_id,
+//   workflow_id, heal_session_id, request_id, ts, plus any custom fields
+//   passed to the log call). For FILTERING, those fields are addressed by
+//   BARE NAME (e.g. `event`, `run_id`) — the `source.*` prefix is the result
+//   projection and is NOT filterable. Cloudflare-injected metadata uses the
+//   `$metadata.*` / `$workers.*` prefixes and stays filterable that way.
+//   All --run / --heal / --workflow / --request / --event / --level flags
+//   therefore match only events whose structured payload carries those keys;
+//   Cloudflare invocation summaries are automatically excluded.
 //
 // EXIT CODES: 0 on success, 1 on config error, 2 on API error.
 
@@ -227,20 +239,24 @@ function buildQueryBody(args: Args): Record<string, unknown> {
 	const pushEq = (key: string, value: string): void => {
 		filters.push({ key, operation: 'eq', type: 'string', value });
 	};
+	// Structured-JSON payload fields are filterable by BARE key (no prefix).
+	// `source.*` is only the viewable projection — filtering against
+	// `source.event` etc. returns zero. Cloudflare metadata uses `$metadata.*`
+	// / `$workers.*` and our logger fields use the bare names.
 	if (args.run) {
-		pushEq('$metadata.run_id', args.run);
+		pushEq('run_id', args.run);
 	}
 	if (args.heal) {
-		pushEq('$metadata.heal_session_id', args.heal);
+		pushEq('heal_session_id', args.heal);
 	}
 	if (args.workflow) {
-		pushEq('$metadata.workflow_id', args.workflow);
+		pushEq('workflow_id', args.workflow);
 	}
 	if (args.request) {
-		pushEq('$metadata.request_id', args.request);
+		pushEq('request_id', args.request);
 	}
 	if (args.event) {
-		pushEq('$metadata.event', args.event);
+		pushEq('event', args.event);
 	}
 
 	const levelOrder = { debug: 0, info: 1, warn: 2, error: 3 } as const;
@@ -258,7 +274,7 @@ function buildQueryBody(args: Args): Record<string, unknown> {
 			kind: 'group',
 			filterCombination: 'or',
 			filters: allowedLevels.map((l) => ({
-				key: '$metadata.level',
+				key: 'level',
 				operation: 'eq',
 				type: 'string',
 				value: l
@@ -282,6 +298,7 @@ function buildQueryBody(args: Args): Record<string, unknown> {
 interface TelemetryEvent {
 	timestamp?: number;
 	$metadata?: Record<string, unknown>;
+	source?: Record<string, unknown>;
 	[key: string]: unknown;
 }
 
@@ -329,10 +346,15 @@ async function runQuery(
 }
 
 function extractPayload(evt: TelemetryEvent): Record<string, unknown> {
-	// The Observability API returns events with the worker's console line
-	// under `$source.scriptName` / `message` / `$metadata`. Our structured
-	// lines already serialize as JSON inside the message — parse if possible,
-	// else fall back to metadata + timestamp.
+	// Structured log lines emitted by src/lib/server/log.ts land with their
+	// JSON object pre-parsed under `source.*` — prefer that when present.
+	// Fall back to `$metadata` + `message` for Cloudflare-injected events
+	// (invocation summaries, scheduled triggers, etc.) that don't have our
+	// logger's envelope.
+	const src = evt.source;
+	if (src && typeof src === 'object' && Object.keys(src).length > 0) {
+		return { ts: evt.timestamp, ...src };
+	}
 	const meta = evt.$metadata ?? {};
 	const rawMessage = (evt as { message?: unknown }).message;
 	if (typeof rawMessage === 'string') {
