@@ -5,8 +5,12 @@ import { deleteEventSource, getEventSourceForProject } from '$lib/server/db/quer
 import { countEventsForSource, listEventsForSource } from '$lib/server/db/queries/events';
 import { listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import { listRunsForWorkflow } from '$lib/server/db/queries/runs';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { errorMessage } from '$lib/server/util';
+
+const log = createLogger('source-delete');
 
 // Layout enforces project ownership; the event-source lookup is still scoped
 // by project so /p/A/s/[id-of-B-source] 404s rather than leaking.
@@ -75,9 +79,10 @@ export const actions: Actions = {
 				try {
 					await tearDownWorkflow(env, w.id);
 				} catch (err) {
-					console.error('[source-delete] tearDownWorkflow failed', {
+					log.error(EVENTS.TEARDOWN_WFP_DELETE_FAILED, {
 						error: errorMessage(err),
-						workflowId: w.id
+						workflow_id: w.id,
+						source: 'source-delete'
 					});
 				}
 			}

@@ -3,7 +3,11 @@
 // bootstrap worker reconstructs the `{ body, headers }` event at runtime.
 
 import { type ExecuteSourceEventResult, executeSourceEvent } from '$lib/server/engine';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
 import { redactHeaders } from './redact';
+
+const log = createLogger('webhook');
 
 export interface IngestWebhookInput {
 	eventSourceId: string;
@@ -16,10 +20,16 @@ export async function ingestWebhookEvent(
 	input: IngestWebhookInput
 ): Promise<ExecuteSourceEventResult> {
 	const headers = redactHeaders(input.rawHeaders);
-	return executeSourceEvent(env, {
+	const result = await executeSourceEvent(env, {
 		eventSourceId: input.eventSourceId,
 		headers,
 		payload: input.payload,
 		trigger: 'webhook'
 	});
+	log.info(EVENTS.WEBHOOK_INGESTED, {
+		event_source_id: input.eventSourceId,
+		event_id: result.eventId,
+		dispatched: result.dispatched.length
+	});
+	return result;
 }

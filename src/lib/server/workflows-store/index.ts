@@ -1,8 +1,12 @@
 import { getDb } from '$lib/server/db';
 import { deleteWorkflow as deleteWorkflowRow, getWorkflow } from '$lib/server/db/queries/workflows';
 import { listVersions } from '$lib/server/db/queries/versions';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
 import { errorMessage } from '$lib/server/util';
 import { type WfpBinding, deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
+
+const log = createLogger('workflows-store');
 
 // Worker script names max out at 63 chars. With the 36-char UUIDv4 workflow
 // id, `wf-${id}-v${n}` would exceed that for 5+ digit versions, so we take
@@ -66,10 +70,10 @@ export async function tearDownWorkflow(env: Env, workflowId: string): Promise<Te
 			scriptsDeleted += 1;
 		} catch (error) {
 			scriptsFailed += 1;
-			console.error('[teardown] WFP delete failed', {
+			log.error(EVENTS.TEARDOWN_WFP_DELETE_FAILED, {
 				error: errorMessage(error),
-				scriptName: v.deployPath,
-				workflowId
+				script_name: v.deployPath,
+				workflow_id: workflowId
 			});
 		}
 	}
