@@ -4,6 +4,10 @@
 - **Package Manager**: bun
 - **Add-ons**: prettier, eslint, playwright, mcp
 
+## Inspecting prod logs
+
+Historical prod logs are queryable via `bun scripts/logs.ts` (reads `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` from env or `.dev.vars`). Prefer this over `wrangler tail` for any debugging loop — it hits Workers Observability, returns up to 3 days of history as JSONL, and filters by correlation ID in <5s. Run `bun scripts/logs.ts --help` for the flag list; `docs/logging.md` has worked examples and the canonical event-name vocabulary. Structured events emitted by `src/lib/server/log.ts` are filterable by bare key (`--run`, `--heal`, `--workflow`, `--request`, `--event`, `--level`).
+
 ---
 
 You are able to use the Svelte MCP server, where you have access to comprehensive Svelte 5 and SvelteKit documentation. Here's how to use the available tools effectively:
