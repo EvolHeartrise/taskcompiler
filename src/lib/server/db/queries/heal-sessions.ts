@@ -39,20 +39,33 @@ export interface CreateHealSessionInput {
 	triggeringRunId: string;
 }
 
-export async function createHealSession(
+// The unique partial index `idx_heal_sessions_one_running_per_workflow`
+// (status='running') makes this INSERT the slot lock: if another heal is
+// already in flight for the workflow, SQLite raises a UNIQUE constraint
+// failure, and we surface that as `null` so the caller can skip spawning
+// a duplicate Workflow instance. The successful row IS the claim — there
+// is no separate "check then create" step that could race.
+export async function tryClaimHealSession(
 	db: D1Database,
 	input: CreateHealSessionInput
-): Promise<HealSession> {
+): Promise<HealSession | null> {
 	const id = uuid();
 	const startedAt = now();
-	await db
-		.prepare(
-			`INSERT INTO heal_sessions
-			 (id, workflow_id, triggering_run_id, started_at, finished_at, status, diff, test_results_json, new_version_id, agent_transcript_json, unhealable_category, unhealable_reason, resolved_at)
-			 VALUES (?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
-		)
-		.bind(id, input.workflowId, input.triggeringRunId, startedAt)
-		.run();
+	try {
+		await db
+			.prepare(
+				`INSERT INTO heal_sessions
+				 (id, workflow_id, triggering_run_id, started_at, finished_at, status, diff, test_results_json, new_version_id, agent_transcript_json, unhealable_category, unhealable_reason, resolved_at)
+				 VALUES (?, ?, ?, ?, NULL, 'running', NULL, NULL, NULL, NULL, NULL, NULL, NULL)`
+			)
+			.bind(id, input.workflowId, input.triggeringRunId, startedAt)
+			.run();
+	} catch (error) {
+		if (isUniqueConstraintError(error)) {
+			return null;
+		}
+		throw error;
+	}
 	return {
 		agentTranscript: null,
 		diff: null,
@@ -68,6 +81,19 @@ export async function createHealSession(
 		unhealableReason: null,
 		workflowId: input.workflowId
 	};
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false;
+	}
+	const msg = error.message;
+	// D1 surfaces SQLite errors as plain text; both the partial-index name
+	// and the generic "UNIQUE constraint failed" prefix are reliable markers.
+	return (
+		msg.includes('UNIQUE constraint failed') ||
+		msg.includes('idx_heal_sessions_one_running_per_workflow')
+	);
 }
 
 export interface FinishHealSessionInput {
