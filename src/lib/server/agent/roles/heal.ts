@@ -9,6 +9,7 @@ import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { EmitSuccess, makeTypecheckedEmitTool, wrapTerminal } from './shared.ts';
+import { buildTriageBlock } from '$lib/server/healer/triage';
 import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
 import { errorMessage, truncate } from '$lib/server/util';
 
@@ -126,12 +127,23 @@ function buildUserMessage(args: {
 	triggeringError: RunError | null;
 	triggeringLogs: RunLogEntry[] | null;
 	failedEvent: Event | null;
-	historicalEventCount: number;
+	historicalEvents: readonly Event[];
 	availableSecrets: string[];
 }): string {
 	const parts: string[] = [];
 	parts.push(`Workflow: ${args.workflowName} (id=${args.workflowId})`);
 	parts.push('');
+
+	// Triage up top so the agent doesn't re-derive things we already know.
+	parts.push(
+		buildTriageBlock({
+			currentSource: args.currentSource,
+			failedEvent: args.failedEvent,
+			historicalEvents: args.historicalEvents,
+			triggeringError: args.triggeringError
+		})
+	);
+
 	parts.push('## Original user prompt');
 	parts.push(args.userPrompt || '(none)');
 	parts.push('');
@@ -147,7 +159,7 @@ function buildUserMessage(args: {
 	parts.push(truncate(args.currentSource, 8000));
 	parts.push('```');
 	parts.push('');
-	parts.push('## Triggering failed run');
+	parts.push('## Triggering failed run — error');
 	if (args.triggeringError) {
 		parts.push(`error.name: ${args.triggeringError.name}`);
 		parts.push(`error.message: ${args.triggeringError.message}`);
@@ -161,11 +173,18 @@ function buildUserMessage(args: {
 		parts.push('(no error recorded)');
 	}
 	parts.push('');
-	parts.push('## Logs from that run');
-	parts.push('```json');
-	parts.push(formatJson(args.triggeringLogs ?? [], { pretty: true, max: 3000 }));
-	parts.push('```');
-	parts.push('');
+
+	// Short log tail only — the triage block already classifies + surfaces
+	// source context. Full logs are available via get_run when needed.
+	const logTail = (args.triggeringLogs ?? []).slice(-8);
+	if (logTail.length > 0) {
+		parts.push('## Log tail from that run (last 8 entries)');
+		parts.push('```json');
+		parts.push(formatJson(logTail, { pretty: true, max: 1500 }));
+		parts.push('```');
+		parts.push('');
+	}
+
 	parts.push('## Failed event payload');
 	if (args.failedEvent) {
 		parts.push(
@@ -178,10 +197,10 @@ function buildUserMessage(args: {
 		parts.push('(event not found)');
 	}
 	parts.push('');
-	parts.push(`## Historical events available: ${args.historicalEventCount}`);
+	parts.push(`## Historical events available: ${args.historicalEvents.length}`);
 	parts.push('');
 	parts.push(
-		'Diagnose the root cause. Use `list_events`, `get_event`, `list_failed_runs`, `get_run`, `run_test_event` to explore. When you have a fix, call `emit_fixed_workflow` ONCE with the complete new module source. Your fix must not throw on any historical event — the orchestrator will verify. Prefer minimal, surgical changes.'
+		"Diagnose the root cause. The TRIAGE block above already classifies the error and shows source context for the failing line — don't re-derive those. Use `list_events`, `get_event`, `list_failed_runs`, `get_run`, `run_test_event` to explore; if you need multiple events, emit all `get_event` calls in one turn. When you have a fix, call `emit_fixed_workflow` ONCE with the complete new module source. Prefer minimal, surgical changes."
 	);
 	return parts.join('\n');
 }
@@ -392,7 +411,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 
 	const triggeringRun = await getRun(db, opts.triggeringRunId);
 	const failedEvent = triggeringRun ? await getEvent(db, triggeringRun.eventId) : null;
-	const historicalEventCount = (await listAllEventsForWorkflow(db, opts.workflowId)).length;
+	const historicalEvents = await listAllEventsForWorkflow(db, opts.workflowId);
 	const secretMetas = await listSecretNamesForProject(db, workflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
 
@@ -400,7 +419,7 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		availableSecrets: secretNames,
 		currentSource,
 		failedEvent,
-		historicalEventCount,
+		historicalEvents,
 		triggeringError: triggeringRun?.error ?? null,
 		triggeringLogs: triggeringRun?.logs ?? null,
 		userPrompt: workflow.prompt,
