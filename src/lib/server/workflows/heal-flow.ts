@@ -55,10 +55,19 @@ type AgentStepSummary =
 
 // Each heal_session row claimed by the executor must reach a terminal
 // status — otherwise the partial unique index permanently blocks future
-// heals for that workflow. The outer try/catch in run() guarantees that
-// any in-process exception releases the slot; claimHealSlotWithStaleRecovery
-// in the executor handles the harder case of the workflow being killed
-// before any JS runs (worker eviction, queue eviction, etc).
+// heals for that workflow. Finalization layers, outer-to-inner:
+//   1. Per-step try/catch inside runInner (agent-heal / test-sweep /
+//      deploy-and-replay) writes a step-specific terminal status when a
+//      step.do throws after its configured retries exhaust. This is where
+//      nearly all legitimate failures land, and it preserves the
+//      informative `agent_failed` / `sweep_failed` / `deploy_failed`
+//      distinction in the row and the return value.
+//   2. The outer catch in run() is a safety net for errors that escape
+//      outside any step.do (setup code, withLogContext plumbing, etc.).
+//      It writes a generic `failed` with a "heal-flow aborted" reason.
+//   3. claimHealSlotWithStaleRecovery in the executor handles the harder
+//      case of the workflow being killed before any JS runs (worker
+//      eviction, queue eviction) by finalizing rows older than 60 min.
 //
 // HEAL_AGENT_MAX_TURNS sits well under the runAgent default of 50 to fit
 // inside the Workflows per-step CPU budget (5 min configurable on Paid).
@@ -112,10 +121,19 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 					});
 					return result;
 				} catch (error) {
+					// Pure safety net: the per-step failure paths inside
+					// runInner now own their own finalization (see
+					// agent-heal / test-sweep / deploy-and-replay catches).
+					// If we still land here the error came from outside a
+					// step.do — setup code, withLogContext plumbing, or a
+					// NonRetryableError from a step path we haven't explicitly
+					// wrapped — so the session can genuinely be orphaned.
+					// releaseRunningSlot already no-ops when the row is
+					// already terminal, so this is safe unconditionally.
 					const message = errorMessage(error);
 					log.error(EVENTS.WORKFLOW_RUN_FAILED, {
 						error: message,
-						reason: 'run() threw, releasing slot'
+						reason: 'run() threw outside a handled step, releasing slot'
 					});
 					await this.releaseRunningSlot(healSessionId, message);
 					throw error;
@@ -156,6 +174,64 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		}
 	}
 
+	// Finalizes the heal_session row when the agent-heal step throws after
+	// retries exhaust. Preserves any transcript already persisted mid-step:
+	// the fixed path calls updateHealSessionTranscript before returning, so
+	// a re-entry that made partial progress still has the transcript on the
+	// row. Status is `failed` because the agent loop never produced a
+	// usable candidate source this time around.
+	private async finalizeAgentExhausted(healSessionId: string, reason: string): Promise<void> {
+		try {
+			const session = await getHealSession(getDb(this.env), healSessionId);
+			if (!session || session.status !== 'running') {
+				return;
+			}
+			await finishHealSession(getDb(this.env), healSessionId, {
+				agentTranscript: session.agentTranscript,
+				diff: null,
+				newVersionId: null,
+				status: 'failed',
+				testResults: null,
+				unhealableReason: `agent-heal exhausted retries: ${reason}`
+			});
+			log.info(EVENTS.HEAL_SLOT_RELEASED, { reason: `agent-heal exhausted: ${reason}` });
+		} catch (releaseError) {
+			log.error(EVENTS.HEAL_SLOT_RELEASE_FAILED, {
+				release_error: errorMessage(releaseError)
+			});
+		}
+	}
+
+	// Finalizes the heal_session row when the test-sweep step throws after
+	// retries exhaust. We have a candidateSourceTs so we can still persist a
+	// diff for post-mortem inspection even though no sweep results exist.
+	private async finalizeSweepExhausted(
+		healSessionId: string,
+		previousSourceTs: string | null,
+		candidateSourceTs: string,
+		reason: string
+	): Promise<void> {
+		try {
+			const session = await getHealSession(getDb(this.env), healSessionId);
+			if (!session || session.status !== 'running') {
+				return;
+			}
+			await finishHealSession(getDb(this.env), healSessionId, {
+				agentTranscript: session.agentTranscript,
+				diff: previousSourceTs !== null ? computeDiff(previousSourceTs, candidateSourceTs) : null,
+				newVersionId: null,
+				status: 'failed',
+				testResults: null,
+				unhealableReason: `test-sweep exhausted retries: ${reason}`
+			});
+			log.info(EVENTS.HEAL_SLOT_RELEASED, { reason: `test-sweep exhausted: ${reason}` });
+		} catch (releaseError) {
+			log.error(EVENTS.HEAL_SLOT_RELEASE_FAILED, {
+				release_error: errorMessage(releaseError)
+			});
+		}
+	}
+
 	private async runInner(
 		step: WorkflowStep,
 		ids: { workflowId: string; triggeringRunId: string; healSessionId: string }
@@ -178,57 +254,74 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 		// `delay` between them); each individual invocation is still bound
 		// by Workers' per-call CPU/wall budget (~5 min on Paid). Two retries
 		// at 5 min each + 5 s delay fits in the 15-minute envelope.
-		const agentSummary = await step.do(
-			'agent-heal',
-			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '15 minutes' },
-			(): Promise<AgentStepSummary> =>
-				withLogContext({ step: 'agent-heal' }, async () => {
-					const outcome = await healWorkflow({
-						env,
-						healSessionId,
-						maxTurns: HEAL_AGENT_MAX_TURNS,
-						triggeringRunId,
-						workflowId
-					});
-					const transcript = agentEventsToTranscript(outcome.agentTranscript);
+		//
+		// If step.do throws after its configured retries exhaust, we catch
+		// here (rather than at the outer run() boundary) so the heal_session
+		// row is finalized with the correct agent_failed status + a specific
+		// reason instead of the generic "heal-flow aborted" written by the
+		// safety net. Same pattern as the deploy-and-replay catch below.
+		let agentSummary: AgentStepSummary;
+		try {
+			agentSummary = await step.do(
+				'agent-heal',
+				{ retries: { delay: '5 seconds', limit: 1 }, timeout: '15 minutes' },
+				(): Promise<AgentStepSummary> =>
+					withLogContext({ step: 'agent-heal' }, async () => {
+						const outcome = await healWorkflow({
+							env,
+							healSessionId,
+							maxTurns: HEAL_AGENT_MAX_TURNS,
+							triggeringRunId,
+							workflowId
+						});
+						const transcript = agentEventsToTranscript(outcome.agentTranscript);
 
-					if (outcome.kind === 'fixed') {
-						// Leave session `running`; downstream steps finalize it.
-						await updateHealSessionTranscript(getDb(env), healSessionId, transcript);
-						return {
-							kind: 'fixed',
-							sourceTs: outcome.sourceTs,
-							summary: outcome.summary
-						};
-					}
+						if (outcome.kind === 'fixed') {
+							// Leave session `running`; downstream steps finalize it.
+							await updateHealSessionTranscript(getDb(env), healSessionId, transcript);
+							return {
+								kind: 'fixed',
+								sourceTs: outcome.sourceTs,
+								summary: outcome.summary
+							};
+						}
 
-					if (outcome.kind === 'unhealable') {
+						if (outcome.kind === 'unhealable') {
+							await finishHealSession(getDb(env), healSessionId, {
+								agentTranscript: transcript,
+								diff: null,
+								newVersionId: null,
+								status: 'needs_attention',
+								testResults: null,
+								unhealableCategory: outcome.category,
+								unhealableReason: outcome.reason
+							});
+							return {
+								category: outcome.category,
+								kind: 'unhealable',
+								reason: outcome.reason
+							};
+						}
+
 						await finishHealSession(getDb(env), healSessionId, {
 							agentTranscript: transcript,
 							diff: null,
 							newVersionId: null,
-							status: 'needs_attention',
-							testResults: null,
-							unhealableCategory: outcome.category,
-							unhealableReason: outcome.reason
+							status: outcome.kind,
+							testResults: null
 						});
-						return {
-							category: outcome.category,
-							kind: 'unhealable',
-							reason: outcome.reason
-						};
-					}
-
-					await finishHealSession(getDb(env), healSessionId, {
-						agentTranscript: transcript,
-						diff: null,
-						newVersionId: null,
-						status: outcome.kind,
-						testResults: null
-					});
-					return { kind: outcome.kind, reason: outcome.reason };
-				})
-		);
+						return { kind: outcome.kind, reason: outcome.reason };
+					})
+			);
+		} catch (error) {
+			const message = errorMessage(error);
+			await this.finalizeAgentExhausted(healSessionId, message);
+			return {
+				healSessionId,
+				reason: `agent-heal exhausted retries: ${message}`,
+				status: 'agent_failed'
+			};
+		}
 
 		if (agentSummary.kind === 'unhealable') {
 			return {
@@ -249,15 +342,31 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 
 		const candidateSourceTs = agentSummary.sourceTs;
 
-		const sweepResults = await step.do(
-			'test-sweep',
-			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
-			(): Promise<HealTestResults & { abortedEarly: boolean }> =>
-				withLogContext({ step: 'test-sweep' }, async () => {
-					const sweep = await runHealTestSweep(env, workflowId, candidateSourceTs);
-					return { ...sweep.results, abortedEarly: sweep.abortedEarly };
-				})
-		);
+		let sweepResults: HealTestResults & { abortedEarly: boolean };
+		try {
+			sweepResults = await step.do(
+				'test-sweep',
+				{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
+				(): Promise<HealTestResults & { abortedEarly: boolean }> =>
+					withLogContext({ step: 'test-sweep' }, async () => {
+						const sweep = await runHealTestSweep(env, workflowId, candidateSourceTs);
+						return { ...sweep.results, abortedEarly: sweep.abortedEarly };
+					})
+			);
+		} catch (error) {
+			const message = errorMessage(error);
+			await this.finalizeSweepExhausted(
+				healSessionId,
+				previousSourceTs,
+				candidateSourceTs,
+				message
+			);
+			return {
+				healSessionId,
+				reason: `test-sweep exhausted retries: ${message}`,
+				status: 'sweep_failed'
+			};
+		}
 
 		if (sweepResults.failed > 0) {
 			await step.do('finish-session-sweep-failed', () =>
