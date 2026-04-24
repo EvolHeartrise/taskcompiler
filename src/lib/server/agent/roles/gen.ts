@@ -1,4 +1,5 @@
 import { type AgentEvent, type AgentRunResult, DEFAULT_MODEL, runAgent } from '../loop.ts';
+import { getDb } from '$lib/server/db';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
@@ -8,6 +9,7 @@ import { makeTypecheckedEmitTool, wrapTerminal } from './shared.ts';
 import type { TriggerType } from '$lib/server/db/types';
 
 export interface GenerateWorkflowOptions {
+	env: Env;
 	name: string;
 	prompt: string;
 	model?: string;
@@ -103,6 +105,7 @@ function formatTrigger(triggerType: TriggerType, cronExpr: string | null): strin
 export async function generateWorkflow(
 	opts: GenerateWorkflowOptions
 ): Promise<GenerateWorkflowResult> {
+	const db = getDb(opts.env);
 	const maxEmitAttempts = 2;
 	const emitState: { attempts: number; emitted: EmittedPayload | null } = {
 		attempts: 0,
@@ -111,15 +114,15 @@ export async function generateWorkflow(
 
 	const controller = new AbortController();
 
-	const preWorkflow = await getWorkflow(opts.workflowId);
+	const preWorkflow = await getWorkflow(db, opts.workflowId);
 	if (!preWorkflow) {
 		throw new Error(`generateWorkflow: workflow row not found (id=${opts.workflowId})`);
 	}
-	const source = await getEventSource(preWorkflow.eventSourceId);
+	const source = await getEventSource(db, preWorkflow.eventSourceId);
 	if (!source) {
 		throw new Error(`generateWorkflow: event source not found (id=${preWorkflow.eventSourceId})`);
 	}
-	const secretMetas = await listSecretNamesForProject(preWorkflow.projectId);
+	const secretMetas = await listSecretNamesForProject(db, preWorkflow.projectId);
 	const secretNames = secretMetas.map((s) => s.name);
 	const userMessage = buildUserMessage(opts, source.triggerType, source.cronExpr, secretNames);
 
@@ -139,6 +142,7 @@ export async function generateWorkflow(
 
 	const result = await runAgent({
 		abortSignal: controller.signal,
+		env: opts.env,
 		model: opts.model ?? DEFAULT_MODEL,
 		onEvent: opts.onEvent,
 		systemPrompt: GEN_SYSTEM_PROMPT,
@@ -161,9 +165,9 @@ export async function generateWorkflow(
 	const { sourceTs } = emitState.emitted;
 	const workflow = preWorkflow;
 
-	const deployPath = await writeVersion(workflow.id, 1, sourceTs);
+	const deployPath = await writeVersion(opts.env, workflow.id, 1, sourceTs);
 
-	const version = await createVersion({
+	const version = await createVersion(db, {
 		createdBy: 'user',
 		deployPath,
 		setAsCurrent: true,

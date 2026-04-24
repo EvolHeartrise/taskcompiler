@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { now, uuid } from '../index.ts';
 import { rowToDomain } from '../mappers.ts';
 import { parseJson } from '$lib/server/util';
 import type { Run, RunError, RunLogEntry, RunStatus } from '../types.ts';
@@ -37,12 +37,12 @@ export interface CreateRunInput {
 	parentRunId?: string | null;
 }
 
-export async function createRun(input: CreateRunInput): Promise<Run> {
+export async function createRun(db: D1Database, input: CreateRunInput): Promise<Run> {
 	const id = uuid();
 	const startedAt = now();
 	const isReplay = input.isReplay ?? false;
 	const parentRunId = input.parentRunId ?? null;
-	await getDb()
+	await db
 		.prepare(
 			`INSERT INTO runs
 			 (id, event_id, workflow_id, version_id, started_at, finished_at, status, error_json, result_json, logs_json, is_replay, parent_run_id)
@@ -75,56 +75,61 @@ export async function createRun(input: CreateRunInput): Promise<Run> {
 }
 
 export async function finishRunOk(
+	db: D1Database,
 	runId: string,
 	result: unknown,
 	logs: RunLogEntry[] | null
 ): Promise<Run | null> {
-	await getDb()
+	await db
 		.prepare(
 			`UPDATE runs SET status = 'ok', finished_at = ?, result_json = ?, logs_json = ? WHERE id = ?`
 		)
 		.bind(now(), JSON.stringify(result ?? null), logs ? JSON.stringify(logs) : null, runId)
 		.run();
-	return getRun(runId);
+	return getRun(db, runId);
 }
 
 export async function finishRunFailed(
+	db: D1Database,
 	runId: string,
 	error: RunError,
 	logs: RunLogEntry[] | null
 ): Promise<Run | null> {
-	await getDb()
+	await db
 		.prepare(
 			`UPDATE runs SET status = 'failed', finished_at = ?, error_json = ?, logs_json = ? WHERE id = ?`
 		)
 		.bind(now(), JSON.stringify(error), logs ? JSON.stringify(logs) : null, runId)
 		.run();
-	return getRun(runId);
+	return getRun(db, runId);
 }
 
-export async function markRunSuperseded(runId: string): Promise<Run | null> {
-	await getDb()
+export async function markRunSuperseded(db: D1Database, runId: string): Promise<Run | null> {
+	await db
 		.prepare(`UPDATE runs SET status = 'superseded', finished_at = ? WHERE id = ?`)
 		.bind(now(), runId)
 		.run();
-	return getRun(runId);
+	return getRun(db, runId);
 }
 
-export async function getRun(id: string): Promise<Run | null> {
-	const row = await getDb().prepare(`SELECT * FROM runs WHERE id = ?`).bind(id).first<RunRow>();
+export async function getRun(db: D1Database, id: string): Promise<Run | null> {
+	const row = await db.prepare(`SELECT * FROM runs WHERE id = ?`).bind(id).first<RunRow>();
 	return row ? rowToRun(row) : null;
 }
 
-export async function listRunsForWorkflow(workflowId: string): Promise<Run[]> {
-	const res = await getDb()
+export async function listRunsForWorkflow(db: D1Database, workflowId: string): Promise<Run[]> {
+	const res = await db
 		.prepare(`SELECT * FROM runs WHERE workflow_id = ? ORDER BY started_at DESC`)
 		.bind(workflowId)
 		.all<RunRow>();
 	return res.results.map(rowToRun);
 }
 
-export async function listFailedRunsForWorkflow(workflowId: string): Promise<Run[]> {
-	const res = await getDb()
+export async function listFailedRunsForWorkflow(
+	db: D1Database,
+	workflowId: string
+): Promise<Run[]> {
+	const res = await db
 		.prepare(
 			`SELECT * FROM runs WHERE workflow_id = ? AND status = 'failed' ORDER BY started_at DESC`
 		)
@@ -139,8 +144,11 @@ export interface RunStats {
 }
 
 // One query instead of N per-workflow list lookups.
-export async function getRunStatsForProject(projectId: string): Promise<Map<string, RunStats>> {
-	const res = await getDb()
+export async function getRunStatsForProject(
+	db: D1Database,
+	projectId: string
+): Promise<Map<string, RunStats>> {
+	const res = await db
 		.prepare(
 			`SELECT r.workflow_id AS workflow_id, r.status AS status, COUNT(*) AS count
 			 FROM runs r
@@ -162,8 +170,8 @@ export async function getRunStatsForProject(projectId: string): Promise<Map<stri
 	return stats;
 }
 
-export async function listFailedRunsByEvent(workflowId: string): Promise<Run[]> {
-	const res = await getDb()
+export async function listFailedRunsByEvent(db: D1Database, workflowId: string): Promise<Run[]> {
+	const res = await db
 		.prepare(
 			`SELECT r.* FROM runs r
 			 JOIN (

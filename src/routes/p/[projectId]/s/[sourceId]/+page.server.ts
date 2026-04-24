@@ -1,5 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { getDb } from '$lib/server/db';
 import { deleteEventSource, getEventSourceForProject } from '$lib/server/db/queries/event-sources';
 import { countEventsForSource, listEventsForSource } from '$lib/server/db/queries/events';
 import { listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
@@ -9,21 +10,22 @@ import { errorMessage } from '$lib/server/util';
 
 // Layout enforces project ownership; the event-source lookup is still scoped
 // by project so /p/A/s/[id-of-B-source] 404s rather than leaking.
-export const load: PageServerLoad = async ({ params, url }) => {
-	const source = await getEventSourceForProject(params.sourceId, params.projectId);
+export const load: PageServerLoad = async ({ params, url, platform }) => {
+	const db = getDb(platform!.env);
+	const source = await getEventSourceForProject(db, params.sourceId, params.projectId);
 	if (!source) {
 		error(404, 'Event source not found');
 	}
 
 	const [recentEvents, totalEvents, workflows] = await Promise.all([
-		listEventsForSource(source.id, { limit: 50 }),
-		countEventsForSource(source.id),
-		listWorkflowsForEventSource(source.id)
+		listEventsForSource(db, source.id, { limit: 50 }),
+		countEventsForSource(db, source.id),
+		listWorkflowsForEventSource(db, source.id)
 	]);
 
 	const enrichedWorkflows = await Promise.all(
 		workflows.map(async (w) => {
-			const runs = await listRunsForWorkflow(w.id);
+			const runs = await listRunsForWorkflow(db, w.id);
 			const okRuns = runs.filter((r) => r.status === 'ok').length;
 			const failedRuns = runs.filter((r) => r.status === 'failed').length;
 			return {
@@ -49,8 +51,10 @@ export const load: PageServerLoad = async ({ params, url }) => {
 };
 
 export const actions: Actions = {
-	delete: async ({ params, request }) => {
-		const source = await getEventSourceForProject(params.sourceId, params.projectId);
+	delete: async ({ params, request, platform }) => {
+		const env = platform!.env;
+		const db = getDb(env);
+		const source = await getEventSourceForProject(db, params.sourceId, params.projectId);
 		if (!source) {
 			error(404, 'Event source not found');
 		}
@@ -66,10 +70,10 @@ export const actions: Actions = {
 		}
 
 		try {
-			const workflows = await listWorkflowsForEventSource(source.id);
+			const workflows = await listWorkflowsForEventSource(db, source.id);
 			for (const w of workflows) {
 				try {
-					await tearDownWorkflow(w.id);
+					await tearDownWorkflow(env, w.id);
 				} catch (err) {
 					console.error('[source-delete] tearDownWorkflow failed', {
 						error: errorMessage(err),
@@ -77,7 +81,7 @@ export const actions: Actions = {
 					});
 				}
 			}
-			await deleteEventSource(source.id);
+			await deleteEventSource(db, source.id);
 		} catch (err) {
 			return fail(500, { delete: { error: `Delete failed: ${errorMessage(err)}` } });
 		}

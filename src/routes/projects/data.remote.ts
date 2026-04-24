@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { form, getRequestEvent, query } from '$app/server';
+import { getDb } from '$lib/server/db';
 import {
 	createProject as createProjectRow,
 	getProjectForUser,
@@ -28,9 +29,10 @@ export const getProjects = query(
 		if (!event.locals.user) {
 			error(401, 'unauthorized');
 		}
-		const projects = await listProjectsForUser(event.locals.user.id);
+		const db = getDb(event.platform!.env);
+		const projects = await listProjectsForUser(db, event.locals.user.id);
 		const counts = await Promise.all(
-			projects.map(async (p) => (await listWorkflowsForProject(p.id)).length)
+			projects.map(async (p) => (await listWorkflowsForProject(db, p.id)).length)
 		);
 		const cookieId = event.cookies.get(PROJECT_COOKIE);
 		const lastVisitedId = projects.find((p) => p.id === cookieId)?.id ?? null;
@@ -64,7 +66,10 @@ export const createProject = form(
 		}
 		let newId: string;
 		try {
-			const project = await createProjectRow({ name, userId: event.locals.user.id });
+			const project = await createProjectRow(getDb(event.platform!.env), {
+				name,
+				userId: event.locals.user.id
+			});
 			newId = project.id;
 		} catch (err) {
 			return { error: errorMessage(err) };
@@ -91,11 +96,12 @@ export const renameProject = form(
 		if (name.length > NAME_MAX_LEN) {
 			return { ok: false, error: `Name must be ≤ ${NAME_MAX_LEN} characters.` };
 		}
-		const project = await getProjectForUser(projectId, event.locals.user.id);
+		const db = getDb(event.platform!.env);
+		const project = await getProjectForUser(db, projectId, event.locals.user.id);
 		if (!project) {
 			return { ok: false, error: 'Project not found.' };
 		}
-		const updated = await renameProjectRow(projectId, event.locals.user.id, name);
+		const updated = await renameProjectRow(db, projectId, event.locals.user.id, name);
 		if (!updated) {
 			return { ok: false, error: 'Project not found.' };
 		}

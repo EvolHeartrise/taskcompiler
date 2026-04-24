@@ -1,3 +1,4 @@
+import { getDb } from '$lib/server/db';
 import { deleteWorkflow as deleteWorkflowRow, getWorkflow } from '$lib/server/db/queries/workflows';
 import { listVersions } from '$lib/server/db/queries/versions';
 import { errorMessage } from '$lib/server/util';
@@ -27,16 +28,17 @@ export function projectIdBinding(projectId: string): WfpBinding {
 }
 
 export async function writeVersion(
+	env: Env,
 	workflowId: string,
 	version: number,
 	sourceTs: string
 ): Promise<string> {
-	const workflow = await getWorkflow(workflowId);
+	const workflow = await getWorkflow(getDb(env), workflowId);
 	if (!workflow) {
 		throw new Error(`writeVersion: workflow not found: ${workflowId}`);
 	}
 	const scriptName = workflowScriptName(workflowId, version);
-	await uploadWorkflow({
+	await uploadWorkflow(env, {
 		bindings: [projectIdBinding(workflow.projectId)],
 		scriptName,
 		userSourceTs: sourceTs
@@ -53,13 +55,14 @@ export interface TearDownResult {
 // WFP script deletes are best-effort: a failed delete is logged but doesn't
 // block the DB delete, since a workflow row pointing at missing scripts is
 // worse than orphan scripts (which can be cleaned up later).
-export async function tearDownWorkflow(workflowId: string): Promise<TearDownResult> {
-	const versions = await listVersions(workflowId);
+export async function tearDownWorkflow(env: Env, workflowId: string): Promise<TearDownResult> {
+	const db = getDb(env);
+	const versions = await listVersions(db, workflowId);
 	let scriptsDeleted = 0;
 	let scriptsFailed = 0;
 	for (const v of versions) {
 		try {
-			await deleteWorkflow(v.deployPath);
+			await deleteWorkflow(env, v.deployPath);
 			scriptsDeleted += 1;
 		} catch (error) {
 			scriptsFailed += 1;
@@ -70,6 +73,6 @@ export async function tearDownWorkflow(workflowId: string): Promise<TearDownResu
 			});
 		}
 	}
-	const dbDeleted = await deleteWorkflowRow(workflowId);
+	const dbDeleted = await deleteWorkflowRow(db, workflowId);
 	return { dbDeleted, scriptsDeleted, scriptsFailed };
 }

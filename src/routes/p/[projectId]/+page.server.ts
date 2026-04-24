@@ -1,4 +1,5 @@
 import type { PageServerLoad } from './$types';
+import { getDb } from '$lib/server/db';
 import { listEventSourcesForProject } from '$lib/server/db/queries/event-sources';
 import { countEventsBySourceForProject } from '$lib/server/db/queries/events';
 import {
@@ -8,13 +9,14 @@ import {
 import { getRunStatsForProject } from '$lib/server/db/queries/runs';
 
 // Project ownership is enforced by /p/[projectId]/+layout.server.ts.
-export const load: PageServerLoad = async ({ params }) => {
+export const load: PageServerLoad = async ({ params, platform }) => {
+	const db = getDb(platform!.env);
 	const [sources, workflows, eventsBySource, workflowsBySource, runStats] = await Promise.all([
-		listEventSourcesForProject(params.projectId),
-		listWorkflowsForProject(params.projectId),
-		countEventsBySourceForProject(params.projectId),
-		countWorkflowsBySourceForProject(params.projectId),
-		getRunStatsForProject(params.projectId)
+		listEventSourcesForProject(db, params.projectId),
+		listWorkflowsForProject(db, params.projectId),
+		countEventsBySourceForProject(db, params.projectId),
+		countWorkflowsBySourceForProject(db, params.projectId),
+		getRunStatsForProject(db, params.projectId)
 	]);
 
 	return {

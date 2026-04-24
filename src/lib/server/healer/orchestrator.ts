@@ -1,5 +1,6 @@
 import { type DispatchTally, replayFailedEvents } from '$lib/server/engine/replay';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
+import { getDb } from '$lib/server/db';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { createVersion, getCurrentVersion } from '$lib/server/db/queries/versions';
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
@@ -106,22 +107,24 @@ export function computeDiff(oldSource: string, newSource: string): string {
 // Bails after EARLY_OUT_FAIL_THRESHOLD failures — each iteration deploys,
 // invokes, and tears down a temp WFP script. Persists nothing.
 export async function runHealTestSweep(
+	env: Env,
 	workflowId: string,
 	sourceTs: string
 ): Promise<HealSweepResult> {
-	const workflow = await getWorkflow(workflowId);
+	const db = getDb(env);
+	const workflow = await getWorkflow(db, workflowId);
 	if (!workflow) {
 		throw new Error(`runHealTestSweep: workflow not found: ${workflowId}`);
 	}
 
-	const historicalEvents = await listAllEventsForWorkflow(workflowId);
+	const historicalEvents = await listAllEventsForWorkflow(db, workflowId);
 	const details: HealTestResultDetail[] = [];
 	let passed = 0;
 	let failed = 0;
 	let abortedEarly = false;
 
 	for (const event of historicalEvents) {
-		const res = await runAgainstEventEphemeral(sourceTs, event, workflow);
+		const res = await runAgainstEventEphemeral(env, sourceTs, event, workflow);
 		const detail: HealTestResultDetail = { eventId: event.id, ok: res.ok };
 		if (!res.ok && res.error) {
 			detail.error = res.error;
@@ -152,16 +155,20 @@ export async function runHealTestSweep(
 // The agent transcript is expected to have already been persisted to the
 // heal_session row by the workflow's agent step; this function only patches
 // in the diff, sweep results, status, and new version id.
-export async function deployHealedVersion(args: {
-	workflowId: string;
-	sourceTs: string;
-	triggeringRunId: string;
-	healSessionId: string;
-	sweep: HealTestResults;
-}): Promise<DeployHealedVersionResult> {
+export async function deployHealedVersion(
+	env: Env,
+	args: {
+		workflowId: string;
+		sourceTs: string;
+		triggeringRunId: string;
+		healSessionId: string;
+		sweep: HealTestResults;
+	}
+): Promise<DeployHealedVersionResult> {
 	const { workflowId, sourceTs, triggeringRunId, healSessionId, sweep } = args;
+	const db = getDb(env);
 
-	const prevCurrent = await getCurrentVersion(workflowId);
+	const prevCurrent = await getCurrentVersion(db, workflowId);
 	if (!prevCurrent) {
 		throw new Error(`deployHealedVersion: workflow has no current version: ${workflowId}`);
 	}
@@ -169,9 +176,9 @@ export async function deployHealedVersion(args: {
 	const diff = computeDiff(prevCurrent.sourceTs, sourceTs);
 	const nextVersionNumber = prevCurrent.version + 1;
 
-	const deployPath = await writeVersion(workflowId, nextVersionNumber, sourceTs);
+	const deployPath = await writeVersion(env, workflowId, nextVersionNumber, sourceTs);
 
-	const version = await createVersion({
+	const version = await createVersion(db, {
 		createdBy: 'heal',
 		deployPath,
 		healedFromRunId: triggeringRunId,
@@ -183,9 +190,9 @@ export async function deployHealedVersion(args: {
 
 	// finishHealSession nulls the column when agentTranscript is undefined,
 	// so re-read and pass the transcript the agent step already wrote.
-	const session = await getHealSessionAgentTranscript(healSessionId);
+	const session = await getHealSessionAgentTranscript(env, healSessionId);
 
-	await finishHealSession(healSessionId, {
+	await finishHealSession(db, healSessionId, {
 		agentTranscript: session,
 		diff,
 		newVersionId: version.id,
@@ -195,7 +202,7 @@ export async function deployHealedVersion(args: {
 
 	let replay: DispatchTally | null = null;
 	try {
-		replay = await replayFailedEvents(workflowId);
+		replay = await replayFailedEvents(env, workflowId);
 	} catch (error) {
 		console.error('healer.deployHealedVersion: replayFailedEvents threw', {
 			error: errorMessage(error),
@@ -212,8 +219,9 @@ export async function deployHealedVersion(args: {
 }
 
 async function getHealSessionAgentTranscript(
+	env: Env,
 	healSessionId: string
 ): Promise<HealAgentTranscriptEntry[] | null> {
-	const session = await getHealSession(healSessionId);
+	const session = await getHealSession(getDb(env), healSessionId);
 	return session?.agentTranscript ?? null;
 }

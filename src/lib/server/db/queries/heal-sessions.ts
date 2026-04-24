@@ -1,4 +1,4 @@
-import { getDb, now, uuid } from '../index.ts';
+import { now, uuid } from '../index.ts';
 import { rowToDomain } from '../mappers.ts';
 import { parseJson } from '$lib/server/util';
 import type {
@@ -39,10 +39,13 @@ export interface CreateHealSessionInput {
 	triggeringRunId: string;
 }
 
-export async function createHealSession(input: CreateHealSessionInput): Promise<HealSession> {
+export async function createHealSession(
+	db: D1Database,
+	input: CreateHealSessionInput
+): Promise<HealSession> {
 	const id = uuid();
 	const startedAt = now();
-	await getDb()
+	await db
 		.prepare(
 			`INSERT INTO heal_sessions
 			 (id, workflow_id, triggering_run_id, started_at, finished_at, status, diff, test_results_json, new_version_id, agent_transcript_json, unhealable_category, unhealable_reason, resolved_at)
@@ -78,10 +81,11 @@ export interface FinishHealSessionInput {
 }
 
 export async function finishHealSession(
+	db: D1Database,
 	id: string,
 	input: FinishHealSessionInput
 ): Promise<HealSession | null> {
-	await getDb()
+	await db
 		.prepare(
 			`UPDATE heal_sessions
 			 SET status = ?, finished_at = ?, diff = ?, test_results_json = ?, new_version_id = ?, agent_transcript_json = ?, unhealable_category = ?, unhealable_reason = ?
@@ -99,45 +103,55 @@ export async function finishHealSession(
 			id
 		)
 		.run();
-	return getHealSession(id);
+	return getHealSession(db, id);
 }
 
 export async function updateHealSessionTranscript(
+	db: D1Database,
 	id: string,
 	transcript: HealAgentTranscriptEntry[]
 ): Promise<void> {
-	await getDb()
+	await db
 		.prepare(`UPDATE heal_sessions SET agent_transcript_json = ? WHERE id = ?`)
 		.bind(JSON.stringify(transcript), id)
 		.run();
 }
 
-export async function markHealSessionResolved(id: string): Promise<HealSession | null> {
-	await getDb()
+export async function markHealSessionResolved(
+	db: D1Database,
+	id: string
+): Promise<HealSession | null> {
+	await db
 		.prepare(`UPDATE heal_sessions SET status = 'resolved', resolved_at = ? WHERE id = ?`)
 		.bind(now(), id)
 		.run();
-	return getHealSession(id);
+	return getHealSession(db, id);
 }
 
-export async function getHealSession(id: string): Promise<HealSession | null> {
-	const row = await getDb()
+export async function getHealSession(db: D1Database, id: string): Promise<HealSession | null> {
+	const row = await db
 		.prepare(`SELECT * FROM heal_sessions WHERE id = ?`)
 		.bind(id)
 		.first<HealSessionRow>();
 	return row ? rowToHealSession(row) : null;
 }
 
-export async function listHealSessionsForWorkflow(workflowId: string): Promise<HealSession[]> {
-	const res = await getDb()
+export async function listHealSessionsForWorkflow(
+	db: D1Database,
+	workflowId: string
+): Promise<HealSession[]> {
+	const res = await db
 		.prepare(`SELECT * FROM heal_sessions WHERE workflow_id = ? ORDER BY started_at DESC`)
 		.bind(workflowId)
 		.all<HealSessionRow>();
 	return res.results.map(rowToHealSession);
 }
 
-export async function getActiveHealSession(workflowId: string): Promise<HealSession | null> {
-	const row = await getDb()
+export async function getActiveHealSession(
+	db: D1Database,
+	workflowId: string
+): Promise<HealSession | null> {
+	const row = await db
 		.prepare(
 			`SELECT * FROM heal_sessions WHERE workflow_id = ? AND status = 'running' ORDER BY started_at DESC LIMIT 1`
 		)
@@ -147,9 +161,10 @@ export async function getActiveHealSession(workflowId: string): Promise<HealSess
 }
 
 export async function getOpenNeedsAttentionSession(
+	db: D1Database,
 	workflowId: string
 ): Promise<HealSession | null> {
-	const row = await getDb()
+	const row = await db
 		.prepare(
 			`SELECT * FROM heal_sessions WHERE workflow_id = ? AND status = 'needs_attention' ORDER BY started_at DESC LIMIT 1`
 		)

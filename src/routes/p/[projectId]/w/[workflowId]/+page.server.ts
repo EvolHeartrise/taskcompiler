@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
+import { getDb } from '$lib/server/db';
 import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { getCurrentVersion, getVersion, listVersions } from '$lib/server/db/queries/versions';
@@ -13,8 +14,9 @@ import { highlightTs } from '$lib/server/highlight';
 
 // Layout enforces project ownership; the workflow lookup is still scoped by
 // project so /p/A/w/[id-of-B-workflow] 404s rather than leaking.
-export const load: PageServerLoad = async ({ params, url }) => {
-	const workflow = await getWorkflowForProject(params.workflowId, params.projectId);
+export const load: PageServerLoad = async ({ params, url, platform }) => {
+	const db = getDb(platform!.env);
+	const workflow = await getWorkflowForProject(db, params.workflowId, params.projectId);
 	if (!workflow) {
 		error(404, 'Workflow not found');
 	}
@@ -29,14 +31,14 @@ export const load: PageServerLoad = async ({ params, url }) => {
 		heals,
 		needsAttention
 	] = await Promise.all([
-		getEventSource(workflow.eventSourceId),
-		getCurrentVersion(workflow.id),
-		listVersions(workflow.id),
-		listEventsForWorkflow(workflow.id, { limit: 50 }),
-		listRunsForWorkflow(workflow.id),
-		listFailedRunsForWorkflow(workflow.id),
-		listHealSessionsForWorkflow(workflow.id),
-		getOpenNeedsAttentionSession(workflow.id)
+		getEventSource(db, workflow.eventSourceId),
+		getCurrentVersion(db, workflow.id),
+		listVersions(db, workflow.id),
+		listEventsForWorkflow(db, workflow.id, { limit: 50 }),
+		listRunsForWorkflow(db, workflow.id),
+		listFailedRunsForWorkflow(db, workflow.id),
+		listHealSessionsForWorkflow(db, workflow.id),
+		getOpenNeedsAttentionSession(db, workflow.id)
 	]);
 	if (!eventSource) {
 		// Shouldn't happen — cascade would have wiped the workflow. Treat as 404.
@@ -45,11 +47,11 @@ export const load: PageServerLoad = async ({ params, url }) => {
 	const runs = allRuns.slice(0, 50);
 
 	const totalRuns = allRuns.length;
-	const totalEvents = (await listEventsForWorkflow(workflow.id, { limit: 10_000 })).length;
+	const totalEvents = (await listEventsForWorkflow(db, workflow.id, { limit: 10_000 })).length;
 
 	const selectedVersionId = url.searchParams.get('version');
 	const selectedVersion =
-		(selectedVersionId ? await getVersion(selectedVersionId) : null) ?? currentVersion;
+		(selectedVersionId ? await getVersion(db, selectedVersionId) : null) ?? currentVersion;
 
 	const selectedVersionSourceHtml = selectedVersion
 		? await highlightTs(selectedVersion.sourceTs)

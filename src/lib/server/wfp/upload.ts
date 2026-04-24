@@ -1,5 +1,4 @@
 import { transform } from 'sucrase';
-import { env } from 'cloudflare:workers';
 import { errorMessage, truncate } from '$lib/server/util';
 import {
 	COMPATIBILITY_DATE,
@@ -54,7 +53,7 @@ function transpile(source: string, label: string): string {
 	}
 }
 
-function requireEnv(): { accountId: string; token: string } {
+function requireEnv(env: Env): { accountId: string; token: string } {
 	const accountId = env.CLOUDFLARE_ACCOUNT_ID;
 	const token = env.CLOUDFLARE_API_TOKEN;
 	const missing: string[] = [];
@@ -74,8 +73,8 @@ function scriptUrl(accountId: string, scriptName: string): string {
 	return `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/dispatch/namespaces/${DISPATCH_NAMESPACE}/scripts/${encodeURIComponent(scriptName)}`;
 }
 
-export async function uploadWorkflow(input: UploadInput): Promise<UploadResult> {
-	const { accountId, token } = requireEnv();
+export async function uploadWorkflow(env: Env, input: UploadInput): Promise<UploadResult> {
+	const { accountId, token } = requireEnv(env);
 
 	const userJs = transpile(input.userSourceTs, 'user workflow');
 	const mainJs = transpile(bootstrapMainSource, 'bootstrap main.ts');
@@ -119,8 +118,8 @@ export async function uploadWorkflow(input: UploadInput): Promise<UploadResult> 
 	return { scriptName: input.scriptName, uploadedAt: Date.now() };
 }
 
-export async function deleteWorkflow(scriptName: string): Promise<void> {
-	const { accountId, token } = requireEnv();
+export async function deleteWorkflow(env: Env, scriptName: string): Promise<void> {
+	const { accountId, token } = requireEnv(env);
 
 	const res = await fetch(scriptUrl(accountId, scriptName), {
 		headers: { Authorization: `Bearer ${token}` },

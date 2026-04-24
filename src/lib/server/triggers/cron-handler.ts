@@ -1,4 +1,5 @@
 import { CronExpressionParser } from 'cron-parser';
+import { getDb } from '$lib/server/db';
 import { listCronEventSources, markEventSourceFired } from '$lib/server/db/queries/event-sources';
 import { executeSourceEvent } from '$lib/server/engine';
 import { errorMessage } from '$lib/server/util';
@@ -16,8 +17,9 @@ export interface CronTickResult {
 // Fires at most once per event source per tick. Missed intervals (e.g.
 // during a control-plane outage) are not backfilled here — catch-up needs
 // a separate pass.
-export async function handleCronTick(now: number = Date.now()): Promise<CronTickResult> {
-	const sources = await listCronEventSources();
+export async function handleCronTick(env: Env, now: number = Date.now()): Promise<CronTickResult> {
+	const db = getDb(env);
+	const sources = await listCronEventSources(db);
 	const result: CronTickResult = {
 		fired: [],
 		scanned: sources.length,
@@ -52,8 +54,8 @@ export async function handleCronTick(now: number = Date.now()): Promise<CronTick
 		}
 
 		try {
-			await markEventSourceFired(source.id, now);
-			const exec = await executeSourceEvent({
+			await markEventSourceFired(db, source.id, now);
+			const exec = await executeSourceEvent(env, {
 				eventSourceId: source.id,
 				payload: { firedAt: now },
 				trigger: 'cron'

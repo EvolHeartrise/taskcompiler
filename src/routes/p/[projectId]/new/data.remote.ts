@@ -1,6 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
-import { env } from 'cloudflare:workers';
-import { form, query } from '$app/server';
+import { form, getRequestEvent, query } from '$app/server';
+import { getDb } from '$lib/server/db';
 import {
 	getEventSourceForProject,
 	listEventSourcesForProject
@@ -26,11 +26,13 @@ export const getEventSourcesWithCounts = query(
 		projectId: string;
 		preselectedSourceId: string | null;
 	}): Promise<{ eventSources: EventSourceWithCount[]; preselectedSourceId: string | null }> => {
-		const sources = await listEventSourcesForProject(projectId);
+		const event = getRequestEvent();
+		const db = getDb(event.platform!.env);
+		const sources = await listEventSourcesForProject(db, projectId);
 
 		let preselected = null;
 		if (preselectedSourceId) {
-			preselected = await getEventSourceForProject(preselectedSourceId, projectId);
+			preselected = await getEventSourceForProject(db, preselectedSourceId, projectId);
 			if (!preselected) {
 				error(404, 'Event source not found');
 			}
@@ -41,7 +43,7 @@ export const getEventSourcesWithCounts = query(
 		const sourcesWithCount = await Promise.all(
 			sources.map(async (s) => ({
 				cronExpr: s.cronExpr,
-				eventCount: await countEventsForSource(s.id),
+				eventCount: await countEventsForSource(db, s.id),
 				id: s.id,
 				name: s.name,
 				triggerType: s.triggerType
@@ -69,6 +71,9 @@ export const createWorkflowAndGenerate = form(
 		sourceId: string;
 		backfill?: string;
 	}): Promise<CreateResult | undefined> => {
+		const event = getRequestEvent();
+		const env = event.platform!.env;
+		const db = getDb(env);
 		const projectId = (data.projectId ?? '').trim();
 		const name = (data.name ?? '').trim();
 		const prompt = (data.prompt ?? '').trim();
@@ -91,7 +96,7 @@ export const createWorkflowAndGenerate = form(
 			return { error: 'Event source is required.', values };
 		}
 
-		const source = await getEventSourceForProject(sourceId, projectId);
+		const source = await getEventSourceForProject(db, sourceId, projectId);
 		if (!source) {
 			return { error: 'Event source not found in this project.', values };
 		}
@@ -99,7 +104,7 @@ export const createWorkflowAndGenerate = form(
 		const workflowId = crypto.randomUUID();
 
 		try {
-			await createWorkflow({
+			await createWorkflow(db, {
 				eventSourceId: source.id,
 				id: workflowId,
 				name,

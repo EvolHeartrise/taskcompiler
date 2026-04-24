@@ -1,7 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { Workflow } from '@cloudflare/workers-types';
-import { env } from 'cloudflare:workers';
-import { command, form, query } from '$app/server';
+import { command, form, getRequestEvent, query } from '$app/server';
+import { getDb } from '$lib/server/db';
 import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import {
 	getOpenNeedsAttentionSession,
@@ -49,7 +49,9 @@ export const getInFlight = query(
 		projectId: string;
 		workflowId: string;
 	}): Promise<InFlightInfo> => {
-		const workflow = await getWorkflowForProject(workflowId, projectId);
+		const event = getRequestEvent();
+		const env = event.platform!.env;
+		const workflow = await getWorkflowForProject(getDb(env), workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
 		}
@@ -63,7 +65,7 @@ export const getInFlight = query(
 			}
 		}
 
-		const heals = await listHealSessionsForWorkflow(workflow.id);
+		const heals = await listHealSessionsForWorkflow(getDb(env), workflow.id);
 		const latestHeal = heals[0];
 		if (latestHeal && latestHeal.status === 'running') {
 			const heal = await fetchInstanceStatus(
@@ -89,11 +91,13 @@ export const deleteWorkflow = form(
 		workflowId: string;
 		confirm_name: string;
 	}): Promise<DeleteResult | undefined> => {
+		const event = getRequestEvent();
+		const env = event.platform!.env;
 		const projectId = (data.projectId ?? '').trim();
 		const workflowId = (data.workflowId ?? '').trim();
 		const confirmName = data.confirm_name ?? '';
 
-		const workflow = await getWorkflowForProject(workflowId, projectId);
+		const workflow = await getWorkflowForProject(getDb(env), workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
 		}
@@ -105,7 +109,7 @@ export const deleteWorkflow = form(
 		}
 
 		try {
-			await tearDownWorkflow(workflow.id);
+			await tearDownWorkflow(env, workflow.id);
 		} catch (err) {
 			return { ok: false, error: `Delete failed: ${errorMessage(err)}` };
 		}
@@ -120,20 +124,23 @@ type ResumeResult =
 export const resumeWorkflow = form(
 	'unchecked',
 	async (data: { projectId: string; workflowId: string }): Promise<ResumeResult> => {
+		const event = getRequestEvent();
+		const env = event.platform!.env;
+		const db = getDb(env);
 		const projectId = (data.projectId ?? '').trim();
 		const workflowId = (data.workflowId ?? '').trim();
 
-		const workflow = await getWorkflowForProject(workflowId, projectId);
+		const workflow = await getWorkflowForProject(db, workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
 		}
 		try {
-			const session = await getOpenNeedsAttentionSession(workflowId);
+			const session = await getOpenNeedsAttentionSession(db, workflowId);
 			if (!session) {
 				return { ok: false, error: 'No needs_attention session to resolve.' };
 			}
-			await markHealSessionResolved(session.id);
-			const replay = await replayFailedEvents(workflowId);
+			await markHealSessionResolved(db, session.id);
+			const replay = await replayFailedEvents(env, workflowId);
 			return {
 				ok: true,
 				attempted: replay.attempted,
@@ -169,7 +176,9 @@ export const triggerWorkflow = command(
 		workflowId: string;
 		payload: string;
 	}): Promise<TriggerResult> => {
-		const workflow = await getWorkflowForProject(workflowId, projectId);
+		const event = getRequestEvent();
+		const env = event.platform!.env;
+		const workflow = await getWorkflowForProject(getDb(env), workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
 		}
@@ -183,7 +192,7 @@ export const triggerWorkflow = command(
 		}
 
 		try {
-			const result = await executeManualEvent({
+			const result = await executeManualEvent(env, {
 				payload: parsed,
 				workflowId
 			});

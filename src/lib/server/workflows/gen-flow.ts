@@ -23,20 +23,14 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 		step: WorkflowStep
 	): Promise<GenWorkflowResult> {
 		const params = event.payload;
-
-		// Force workerd to materialize this WorkflowEntrypoint's binding proxy in
-		// the main scope before the first step.do checkpoint. Without this, the
-		// first env access (lazy, via `import { env } from 'cloudflare:workers'`
-		// deep inside dispatch.ts) lands inside a step.do callback whose
-		// resolution the workflow engine then never observes — the step hangs
-		// until its timeout and surfaces as `WorkflowInternalError`.
-		void this.env.DISPATCHER;
+		const env = this.env;
 
 		const genResult = await step.do(
 			'generate',
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '5 minutes' },
 			async () => {
 				const out = await generateWorkflow({
+					env,
 					name: params.name,
 					prompt: params.prompt,
 					workflowId: params.workflowId
@@ -61,7 +55,7 @@ export class GenerateWorkflowFlow extends WorkflowEntrypoint<Env, GenWorkflowPar
 			{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
 			async (): Promise<DispatchTally | null> => {
 				try {
-					return await backfillWorkflow(params.workflowId);
+					return await backfillWorkflow(env, params.workflowId);
 				} catch (error) {
 					console.error('[gen-flow] backfill threw', {
 						error: errorMessage(error),
