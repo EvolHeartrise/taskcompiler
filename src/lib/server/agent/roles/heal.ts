@@ -110,6 +110,7 @@ No imports from node_modules, no relative imports. \`event\` is \`{ body, header
 ## Principles
 - Diagnose first. Read the error + stack + logs and inspect the failing event payload against the source. A TRIAGE block at the top of the user message already classifies the error, shows the failing line's source context, and lists canary events with distinct payload shapes — skim it before calling any tools.
 - Change as little as possible. Do not rewrite the workflow. Patch the specific bug.
+- Preserve the original user intent from the "Original user prompt" section — your job is to fix the bug, not to redesign the workflow.
 - The most common failure classes: unvalidated event shape, missing ctx.secret, bad HTTP status not checked, JSON parse on a non-JSON response, undefined path in event.
 - Keep the run fail-fast semantics — don't swallow exceptions.
 
