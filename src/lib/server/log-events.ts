@@ -1,0 +1,47 @@
+// Canonical event-name vocabulary. Pass these (not freeform strings) as the
+// first arg to `log.info` / `log.warn` / `log.error` so every call site
+// filters cleanly in the Observability UI (`$.event = "run.started"`).
+//
+// Adding a new event: pick a dotted `<domain>.<past-tense-verb>` name, keep
+// the total under ~30 so agents and humans can learn them by sight.
+
+export const EVENTS = {
+	// Lifecycle of a single run (one dispatched event → one workflow invocation).
+	RUN_STARTED: 'run.started',
+	RUN_COMPLETED: 'run.completed',
+	RUN_FAILED: 'run.failed',
+
+	// Dispatcher round-trips (WFP .get().fetch() to the user script).
+	DISPATCH_RETRY: 'dispatch.retry',
+	DISPATCH_FANOUT_FAILED: 'dispatch.fanout_failed',
+	DISPATCH_INFRA_FAILURE: 'dispatch.infra_failure',
+	DISPATCH_TALLY_THREW: 'dispatch.tally_threw',
+
+	// Heal orchestration (claim/release of the 1-per-workflow slot + spawn).
+	HEAL_CLAIMED: 'heal.claimed',
+	HEAL_SKIPPED: 'heal.skipped',
+	HEAL_SPAWNED: 'heal.spawned',
+	HEAL_SPAWN_FAILED: 'heal.spawn_failed',
+	HEAL_RECLAIMED_STALE: 'heal.reclaimed_stale',
+	HEAL_SLOT_RELEASED: 'heal.slot_released',
+	HEAL_SLOT_RELEASE_FAILED: 'heal.slot_release_failed',
+
+	// Inside a Workflow entrypoint.
+	WORKFLOW_RUN_START: 'workflow.run.start',
+	WORKFLOW_RUN_END: 'workflow.run.end',
+	WORKFLOW_RUN_FAILED: 'workflow.run.failed',
+	WORKFLOW_STEP_WARNING: 'workflow.step.warning',
+
+	// Cron dispatcher.
+	CRON_TICK_END: 'cron.tick.end',
+	CRON_TICK_FAILED: 'cron.tick.failed',
+
+	// Webhook ingest / auth / teardown noise that ships through the same logger.
+	WEBHOOK_INGESTED: 'webhook.ingested',
+	AUTH_MAGIC_LINK_SENT: 'auth.magic_link.sent',
+	AUTH_EMAIL_SEND_FAILED: 'auth.email.send_failed',
+	TEARDOWN_WFP_DELETE_FAILED: 'teardown.wfp_delete_failed',
+	TEST_RUNNER_CLEANUP_FAILED: 'test_runner.cleanup_failed'
+} as const;
+
+export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
