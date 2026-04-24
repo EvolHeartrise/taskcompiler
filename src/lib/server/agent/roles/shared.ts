@@ -1,12 +1,5 @@
 import type { Tool } from '../tools.ts';
 
-export function truncate(s: string, max: number): string {
-	if (s.length <= max) {
-		return s;
-	}
-	return `${s.slice(0, max)}… [truncated ${s.length - max} chars]`;
-}
-
 export class EmitSuccess {
 	constructor(public readonly payload: unknown) {}
 }

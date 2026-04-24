@@ -1,6 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions } from './$types';
 import { createEventSource } from '$lib/server/db/queries/event-sources';
+import { errorMessage } from '$lib/server/util';
 import type { TriggerType } from '$lib/server/db/types';
 
 export const actions: Actions = {
@@ -36,8 +37,10 @@ export const actions: Actions = {
 				triggerType: trigger
 			});
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			return fail(500, { error: `Could not create event: ${message}`, values });
+			return fail(500, {
+				error: `Could not create event: ${errorMessage(error)}`,
+				values
+			});
 		}
 
 		redirect(303, `/p/${projectId}/s/${id}`);

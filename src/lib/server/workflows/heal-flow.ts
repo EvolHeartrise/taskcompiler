@@ -13,6 +13,7 @@ import {
 	updateHealSessionTranscript
 } from '$lib/server/db/queries/heal-sessions';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
+import { errorMessage } from '$lib/server/util';
 import type { HealTestResults, UnhealableCategory } from '$lib/server/db/types';
 
 export interface HealWorkflowParams {
@@ -206,7 +207,7 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 					})
 			);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			await step.do('finish-session-deploy-failed', async () =>
 				withEnv(env, async () => {
 					await finishHealSession(healSessionId, {

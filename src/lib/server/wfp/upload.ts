@@ -1,5 +1,6 @@
 import { transform } from 'sucrase';
 import { getEnv } from '$lib/server/env';
+import { errorMessage, truncate } from '$lib/server/util';
 import {
 	COMPATIBILITY_DATE,
 	COMPATIBILITY_FLAGS,
@@ -50,16 +51,8 @@ function transpile(source: string, label: string): string {
 	try {
 		return transform(source, { transforms: ['typescript'] }).code;
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		throw new Error(`Failed to transpile ${label}: ${message}`, { cause: error });
+		throw new Error(`Failed to transpile ${label}: ${errorMessage(error)}`, { cause: error });
 	}
-}
-
-function truncate(s: string, max: number): string {
-	if (s.length <= max) {
-		return s;
-	}
-	return `${s.slice(0, max)}… [+${s.length - max} chars]`;
 }
 
 function requireEnv(): { accountId: string; token: string } {

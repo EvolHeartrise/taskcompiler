@@ -8,6 +8,7 @@ import {
 	renameProject
 } from '$lib/server/db/queries/projects';
 import { listWorkflowsForProject } from '$lib/server/db/queries/workflows';
+import { errorMessage } from '$lib/server/util';
 
 const NAME_MAX_LEN = 60;
 
@@ -50,8 +51,7 @@ export const actions: Actions = {
 			const project = await createProject({ name, userId: locals.user.id });
 			newId = project.id;
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(500, { create: { error: msg } });
+			return fail(500, { create: { error: errorMessage(err) } });
 		}
 		// The project layout writes the "last visited" cookie on entry, so we
 		// Just navigate.

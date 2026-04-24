@@ -1,4 +1,5 @@
 import { getEnv } from '$lib/server/env';
+import { truncate } from '$lib/server/util';
 
 // Neutral content-block / message / tool types used by the agent loop.
 // The wire format is Workers AI's OpenAI-compatible chat-completions endpoint,
@@ -96,13 +97,6 @@ interface OAIResponse {
 		finish_reason: string;
 	}>;
 	usage?: { prompt_tokens?: number; completion_tokens?: number };
-}
-
-function truncate(s: string, max: number): string {
-	if (s.length <= max) {
-		return s;
-	}
-	return s.slice(0, max) + `… [+${s.length - max} chars]`;
 }
 
 function toOAIMessages(system: string | undefined, msgs: AgentMessage[]): OAIMessage[] {

@@ -8,6 +8,7 @@ import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunStatus } from '$lib/server/db/types';
 import { getEnv } from '$lib/server/env';
+import { errorMessage } from '$lib/server/util';
 import { type DispatchEvent, type InvokeOutcome, invokeDispatcher } from './dispatch';
 
 export interface ExecuteSourceEventOptions {
@@ -157,7 +158,7 @@ export async function executeSourceEvent(
 				workflowId: workflow.id
 			});
 		} catch (error) {
-			const msg = error instanceof Error ? error.message : String(error);
+			const msg = errorMessage(error);
 			console.error(`[executor] fanout dispatch failed for workflow=${workflow.id}: ${msg}`);
 			dispatched.push({
 				error: { category: 'infra', message: msg, name: 'DispatchThrew' },

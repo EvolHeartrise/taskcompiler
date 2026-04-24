@@ -7,8 +7,9 @@ import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { typecheckWorkflow } from '../typecheck/service';
-import { EmitSuccess, truncate, wrapTerminal } from './shared.ts';
+import { EmitSuccess, wrapTerminal } from './shared.ts';
 import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
+import { errorMessage, truncate } from '$lib/server/util';
 
 export interface HealOptions {
 	workflowId: string;
@@ -609,11 +610,10 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 			userMessage
 		});
 	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
 		return {
 			agentTranscript: [],
 			kind: 'failed',
-			reason: `agent threw: ${message}`
+			reason: `agent threw: ${errorMessage(error)}`
 		};
 	}
 

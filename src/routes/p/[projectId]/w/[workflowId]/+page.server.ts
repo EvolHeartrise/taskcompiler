@@ -15,6 +15,7 @@ import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
 import { highlightTs } from '$lib/server/highlight';
 import { getEnv } from '$lib/server/env';
+import { errorMessage } from '$lib/server/util';
 
 export interface InFlightStatus {
 	status: string;
@@ -150,8 +151,7 @@ export const actions: Actions = {
 		try {
 			await tearDownWorkflow(workflow.id);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(500, { delete: { error: `Delete failed: ${msg}` } });
+			return fail(500, { delete: { error: `Delete failed: ${errorMessage(err)}` } });
 		}
 		redirect(303, `/p/${params.projectId}`);
 	},
@@ -178,8 +178,7 @@ export const actions: Actions = {
 				}
 			};
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(500, { resume: { error: msg } });
+			return fail(500, { resume: { error: errorMessage(err) } });
 		}
 	},
 
@@ -196,8 +195,7 @@ export const actions: Actions = {
 		try {
 			payload = raw.trim() === '' ? {} : JSON.parse(raw);
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(400, { trigger: { error: `Invalid JSON: ${msg}` } });
+			return fail(400, { trigger: { error: `Invalid JSON: ${errorMessage(err)}` } });
 		}
 
 		try {
@@ -216,8 +214,7 @@ export const actions: Actions = {
 				}
 			};
 		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return fail(500, { trigger: { error: msg } });
+			return fail(500, { trigger: { error: errorMessage(err) } });
 		}
 	}
 };

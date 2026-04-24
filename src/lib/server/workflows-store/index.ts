@@ -1,5 +1,6 @@
 import { deleteWorkflow as deleteWorkflowRow, getWorkflow } from '$lib/server/db/queries/workflows';
 import { listVersions } from '$lib/server/db/queries/versions';
+import { errorMessage } from '$lib/server/util';
 import { type WfpBinding, deleteWorkflow, uploadWorkflow } from '$lib/server/wfp';
 
 // Worker script names: lowercase alphanumeric + hyphens, max 63 chars.
@@ -71,7 +72,7 @@ export async function tearDownWorkflow(workflowId: string): Promise<TearDownResu
 		} catch (error) {
 			scriptsFailed += 1;
 			console.error('[teardown] WFP delete failed', {
-				error: error instanceof Error ? error.message : String(error),
+				error: errorMessage(error),
 				scriptName: v.deployPath,
 				workflowId
 			});

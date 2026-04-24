@@ -7,6 +7,7 @@ import {
 import { countEventsForSource } from '$lib/server/db/queries/events';
 import { createWorkflow } from '$lib/server/db/queries/workflows';
 import { getEnv } from '$lib/server/env';
+import { errorMessage } from '$lib/server/util';
 
 // Workflow creation form. Requires an event source — either picked via
 // `?source=<id>` (from the source detail page / project home) or selected
@@ -78,8 +79,10 @@ export const actions: Actions = {
 				prompt
 			});
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			return fail(500, { error: `Could not create workflow: ${message}`, values });
+			return fail(500, {
+				error: `Could not create workflow: ${errorMessage(err)}`,
+				values
+			});
 		}
 
 		try {
@@ -93,9 +96,8 @@ export const actions: Actions = {
 				}
 			});
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
 			return fail(500, {
-				error: `Could not start generation workflow: ${message}`,
+				error: `Could not start generation workflow: ${errorMessage(err)}`,
 				values
 			});
 		}
