@@ -78,6 +78,13 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 	}
 
 	private async releaseRunningSlot(healSessionId: string, reason: string): Promise<void> {
+		// Defensive: a stale instance from a previous deploy may have an
+		// undefined healSessionId in event.payload. We don't have a row to
+		// release in that case, but we also shouldn't crash trying.
+		if (typeof healSessionId !== 'string' || healSessionId.length === 0) {
+			console.warn('[heal-flow] cannot release slot: missing healSessionId', { reason });
+			return;
+		}
 		try {
 			const session = await getHealSession(getDb(this.env), healSessionId);
 			if (!session || session.status !== 'running') {
