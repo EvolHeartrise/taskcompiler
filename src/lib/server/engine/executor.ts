@@ -10,8 +10,13 @@ import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
 import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunStatus } from '$lib/server/db/types';
+import { createLogger } from '$lib/server/log';
+import { withLogContext } from '$lib/server/log-context';
+import { EVENTS } from '$lib/server/log-events';
 import { errorMessage } from '$lib/server/util';
 import { type DispatchEvent, type InvokeOutcome, invokeDispatcher } from './dispatch';
+
+const log = createLogger('executor');
 
 export interface ExecuteSourceEventOptions {
 	eventSourceId: string;
@@ -97,10 +102,13 @@ async function retryWithBackoff<T>(
 		}
 		if (i < maxAttempts - 1) {
 			const delay = baseDelayMs * 3 ** i;
-			console.warn(
-				`[executor] ${label} attempt ${i + 1}/${maxAttempts} failed, retrying in ${delay}ms`,
-				{ reason: last.reason }
-			);
+			log.warn(EVENTS.DISPATCH_RETRY, {
+				label,
+				attempt: i + 1,
+				max_attempts: maxAttempts,
+				delay_ms: delay,
+				reason: last.reason
+			});
 			await sleep(delay);
 		}
 	}
@@ -128,9 +136,11 @@ async function claimHealSlotWithStaleRecovery(
 	if (age < STALE_HEAL_AGE_MS) {
 		return null;
 	}
-	console.warn(
-		`[heal] reclaiming stale slot ${existing.id} (age=${Math.round(age / 1000)}s) for workflow=${input.workflowId}`
-	);
+	log.warn(EVENTS.HEAL_RECLAIMED_STALE, {
+		heal_session_id: existing.id,
+		workflow_id: input.workflowId,
+		age_sec: Math.round(age / 1000)
+	});
 	await releaseHealClaim(
 		db,
 		existing.id,
@@ -154,7 +164,10 @@ async function releaseHealClaim(
 			unhealableReason: `release: ${reason}`
 		});
 	} catch (releaseError) {
-		console.error(`[heal] failed to release claimed slot ${healSessionId}`, releaseError);
+		log.error(EVENTS.HEAL_SLOT_RELEASE_FAILED, {
+			heal_session_id: healSessionId,
+			release_error: errorMessage(releaseError)
+		});
 	}
 }
 
@@ -220,7 +233,10 @@ export async function executeSourceEvent(
 			});
 		} catch (error) {
 			const msg = errorMessage(error);
-			console.error(`[executor] fanout dispatch failed for workflow=${workflow.id}: ${msg}`);
+			log.error(EVENTS.DISPATCH_FANOUT_FAILED, {
+				workflow_id: workflow.id,
+				error: msg
+			});
 			dispatched.push({
 				error: { category: 'infra', message: msg, name: 'DispatchThrew' },
 				runId: null,
@@ -291,94 +307,118 @@ export async function executeExistingEventForWorkflow(
 			workflowId: workflow.id
 		});
 
-		const outcome = await dispatchWithRetry(env, {
-			event: {
-				headers: event.headers,
-				id: event.id,
-				payload: event.payload,
-				receivedAt: event.receivedAt,
-				triggerType: event.triggerType
+		return withLogContext(
+			{
+				run_id: run.id,
+				workflow_id: workflow.id,
+				event_id: event.id,
+				version_id: version.id,
+				trigger: event.triggerType
 			},
-			scriptName: version.deployPath,
-			workflow: { id: workflow.id, name: workflow.name }
-		});
+			async (): Promise<ExecuteResult> => {
+				log.info(EVENTS.RUN_STARTED, { is_replay: opts.isReplay === true });
 
-		if (outcome.kind === 'ok') {
-			await finishRunOk(db, run.id, outcome.result, outcome.logs);
-			return {
-				eventId: event.id,
-				result: outcome.result,
-				runId: run.id,
-				status: 'ok' as const
-			};
-		}
-
-		// Both user_error and infra_error persist as failed runs (distinguished
-		// by error.category); only user_error spawns a heal below.
-		const runError = outcome.error;
-		const runLogs = outcome.kind === 'user_error' ? outcome.logs : [];
-		await finishRunFailed(db, run.id, runError, runLogs);
-
-		if (outcome.kind === 'infra_error') {
-			console.error(
-				`[executor] infra failure after retries for runId=${run.id}: ${runError.name}: ${runError.message}`
-			);
-			return {
-				error: runError,
-				eventId: event.id,
-				runId: run.id,
-				status: 'failed' as const
-			};
-		}
-
-		const needsAttention = await getOpenNeedsAttentionSession(db, workflow.id);
-		if (needsAttention) {
-			console.log(
-				`[heal] skipping create for runId=${run.id}: workflow has unresolved needs_attention session (sessionId=${needsAttention.id})`
-			);
-			return {
-				error: runError,
-				eventId: event.id,
-				runId: run.id,
-				status: 'failed' as const
-			};
-		}
-		// Strict dedup: claim the heal slot via an atomic INSERT against the
-		// partial unique index `idx_heal_sessions_one_running_per_workflow`
-		// (status='running'). If another failure raced us to the slot, the
-		// INSERT returns null and we skip spawning. The slot is freed when
-		// the heal finalizes the row to a terminal status (heal-flow's
-		// catch-all also finalizes on unexpected failure, so a dead heal
-		// can't permanently block future ones).
-		const claimed = await claimHealSlotWithStaleRecovery(db, {
-			triggeringRunId: run.id,
-			workflowId: workflow.id
-		});
-		if (!claimed) {
-			console.log(
-				`[heal] skipping create for runId=${run.id}: another heal already claimed the slot for workflow=${workflow.id}`
-			);
-		} else {
-			try {
-				await env.HEAL_WORKFLOW.create({
-					id: `heal-${claimed.id}`,
-					params: {
-						healSessionId: claimed.id,
-						triggeringRunId: run.id,
-						workflowId: workflow.id
-					}
+				const outcome = await dispatchWithRetry(env, {
+					event: {
+						headers: event.headers,
+						id: event.id,
+						payload: event.payload,
+						receivedAt: event.receivedAt,
+						triggerType: event.triggerType
+					},
+					scriptName: version.deployPath,
+					workflow: { id: workflow.id, name: workflow.name }
 				});
-			} catch (error) {
-				console.error(`failed to start HEAL_WORKFLOW for runId=${run.id}`, error);
-				// Release the claimed slot so future failures can heal.
-				await releaseHealClaim(db, claimed.id, errorMessage(error));
+
+				if (outcome.kind === 'ok') {
+					await finishRunOk(db, run.id, outcome.result, outcome.logs);
+					log.info(EVENTS.RUN_COMPLETED);
+					return {
+						eventId: event.id,
+						result: outcome.result,
+						runId: run.id,
+						status: 'ok' as const
+					};
+				}
+
+				// Both user_error and infra_error persist as failed runs (distinguished
+				// by error.category); only user_error spawns a heal below.
+				const runError = outcome.error;
+				const runLogs = outcome.kind === 'user_error' ? outcome.logs : [];
+				await finishRunFailed(db, run.id, runError, runLogs);
+				log.warn(EVENTS.RUN_FAILED, {
+					category: runError.category,
+					error_name: runError.name,
+					error_message: runError.message
+				});
+
+				if (outcome.kind === 'infra_error') {
+					log.error(EVENTS.DISPATCH_INFRA_FAILURE, {
+						error_name: runError.name,
+						error_message: runError.message
+					});
+					return {
+						error: runError,
+						eventId: event.id,
+						runId: run.id,
+						status: 'failed' as const
+					};
+				}
+
+				const needsAttention = await getOpenNeedsAttentionSession(db, workflow.id);
+				if (needsAttention) {
+					log.info(EVENTS.HEAL_SKIPPED, {
+						reason: 'unresolved needs_attention session',
+						blocking_session_id: needsAttention.id
+					});
+					return {
+						error: runError,
+						eventId: event.id,
+						runId: run.id,
+						status: 'failed' as const
+					};
+				}
+				// Strict dedup: claim the heal slot via an atomic INSERT against the
+				// partial unique index `idx_heal_sessions_one_running_per_workflow`
+				// (status='running'). If another failure raced us to the slot, the
+				// INSERT returns null and we skip spawning. The slot is freed when
+				// the heal finalizes the row to a terminal status (heal-flow's
+				// catch-all also finalizes on unexpected failure, so a dead heal
+				// can't permanently block future ones).
+				const claimed = await claimHealSlotWithStaleRecovery(db, {
+					triggeringRunId: run.id,
+					workflowId: workflow.id
+				});
+				if (!claimed) {
+					log.info(EVENTS.HEAL_SKIPPED, { reason: 'slot already claimed' });
+				} else {
+					log.info(EVENTS.HEAL_CLAIMED, { heal_session_id: claimed.id });
+					try {
+						await env.HEAL_WORKFLOW.create({
+							id: `heal-${claimed.id}`,
+							params: {
+								healSessionId: claimed.id,
+								triggeringRunId: run.id,
+								workflowId: workflow.id
+							}
+						});
+						log.info(EVENTS.HEAL_SPAWNED, { heal_session_id: claimed.id });
+					} catch (error) {
+						log.error(EVENTS.HEAL_SPAWN_FAILED, {
+							heal_session_id: claimed.id,
+							error: errorMessage(error)
+						});
+						// Release the claimed slot so future failures can heal.
+						await releaseHealClaim(db, claimed.id, errorMessage(error));
+					}
+				}
+				return {
+					error: runError,
+					eventId: event.id,
+					runId: run.id,
+					status: 'failed' as const
+				};
 			}
-		}
-		return {
-			error: runError,
-			eventId: event.id,
-			runId: run.id,
-			status: 'failed' as const
-		};
+		);
 	});
 }

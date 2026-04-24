@@ -6,7 +6,11 @@ import { createVersion, getCurrentVersion } from '$lib/server/db/queries/version
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { finishHealSession, getHealSession } from '$lib/server/db/queries/heal-sessions';
 import { writeVersion } from '$lib/server/workflows-store';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
 import { errorMessage } from '$lib/server/util';
+
+const log = createLogger('healer');
 import type { AgentEvent } from '$lib/server/agent/loop';
 import type {
 	HealAgentTranscriptEntry,
@@ -204,9 +208,10 @@ export async function deployHealedVersion(
 	try {
 		replay = await replayFailedEvents(env, workflowId);
 	} catch (error) {
-		console.error('healer.deployHealedVersion: replayFailedEvents threw', {
+		log.error(EVENTS.DISPATCH_TALLY_THREW, {
 			error: errorMessage(error),
-			workflowId
+			workflow_id: workflowId,
+			source: 'deployHealedVersion.replayFailedEvents'
 		});
 	}
 

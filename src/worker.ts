@@ -4,25 +4,33 @@
 // to it (committed to git) provides the types that TS uses.
 
 import sveltekitWorker from '../.svelte-kit/cloudflare/_worker.js';
+import { createLogger } from '$lib/server/log';
+import { withLogContext } from '$lib/server/log-context';
+import { EVENTS } from '$lib/server/log-events';
 import { handleCronTick } from '$lib/server/triggers/cron-handler';
+import { errorMessage } from '$lib/server/util';
 
 export { GenerateWorkflowFlow } from '$lib/server/workflows/gen-flow';
 export { HealWorkflowFlow } from '$lib/server/workflows/heal-flow';
+
+const log = createLogger('cron');
 
 export default {
 	fetch: sveltekitWorker.fetch.bind(sveltekitWorker),
 	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
 		ctx.waitUntil(
-			(async () => {
+			withLogContext({ context: 'cron', tick_id: crypto.randomUUID() }, async (): Promise<void> => {
 				try {
 					const result = await handleCronTick(env, controller.scheduledTime);
-					console.log(
-						`[cron] tick scanned=${result.scanned} fired=${result.fired.length} skipped=${result.skipped.length}`
-					);
+					log.info(EVENTS.CRON_TICK_END, {
+						scanned: result.scanned,
+						fired: result.fired.length,
+						skipped: result.skipped.length
+					});
 				} catch (err) {
-					console.error('[cron] handleCronTick threw', err);
+					log.error(EVENTS.CRON_TICK_FAILED, { error: errorMessage(err) });
 				}
-			})()
+			})
 		);
 	}
 } satisfies ExportedHandler<Env>;

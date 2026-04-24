@@ -3,6 +3,7 @@ import { sequence } from '@sveltejs/kit/hooks';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { building } from '$app/environment';
 import { auth } from '$lib/server/auth';
+import { withLogContext } from '$lib/server/log-context';
 
 function isPublic(pathname: string): boolean {
 	if (pathname === '/auth' || pathname.startsWith('/auth/')) {
@@ -43,4 +44,15 @@ const sessionHandler: Handle = async ({ event, resolve }) => {
 	return resolve(event);
 };
 
-export const handle: Handle = sequence(authHandler, sessionHandler);
+const requestContext: Handle = ({ event, resolve }) =>
+	withLogContext(
+		{
+			context: 'request',
+			request_id: crypto.randomUUID(),
+			request_method: event.request.method,
+			request_path: event.url.pathname
+		},
+		() => resolve(event)
+	);
+
+export const handle: Handle = sequence(requestContext, authHandler, sessionHandler);

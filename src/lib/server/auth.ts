@@ -5,7 +5,11 @@ import { sveltekitCookies } from 'better-auth/svelte-kit';
 import { drizzle } from 'drizzle-orm/d1';
 import { getRequestEvent } from '$app/server';
 import * as schema from './db/auth-schema';
+import { createLogger } from './log';
+import { EVENTS } from './log-events';
 import { errorMessage } from './util';
+
+const log = createLogger('auth');
 
 type Auth = ReturnType<typeof buildAuth>;
 
@@ -53,6 +57,9 @@ async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 	// No verified sender domain yet — log the link so auth works end-to-end
 	// via `wrangler tail`. Set EMAIL_FROM (e.g. "Runely <auth@yourdomain.com>")
 	// once the domain is on Cloudflare DNS and Email Service is enabled.
+	// An unset EMAIL_FROM *is* the dev signal here — in prod it will always
+	// be set — so we surface the URL-with-token to the unstructured stream
+	// only on that branch and never into the structured logger.
 	if (!env.EMAIL_FROM) {
 		console.log(`[auth] magic link for ${email}: ${url}`);
 		return;
@@ -65,12 +72,16 @@ async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 			html: `<p>Click the link below to sign in to Runely. It expires in 5 minutes.</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, ignore this email.</p>`,
 			text: `Sign in to Runely: ${url}\n\nThis link expires in 5 minutes. If you didn't request it, ignore this email.`
 		});
+		log.info(EVENTS.AUTH_MAGIC_LINK_SENT);
 	} catch (err) {
-		// Fall back to console logging so a misconfigured sender domain doesn't
-		// lock users out during the beta.
+		// Fall back to the unstructured stream with the URL so a misconfigured
+		// sender domain doesn't lock users out. Also emit a structured warning
+		// (without the URL) so on-call sees the failure in the Observability
+		// pipeline without the signed token leaking into it.
 		console.error(
 			`[auth] EMAIL.send failed (${errorMessage(err)}); magic link for ${email}: ${url}`
 		);
+		log.error(EVENTS.AUTH_EMAIL_SEND_FAILED, { error: errorMessage(err) });
 	}
 }
 

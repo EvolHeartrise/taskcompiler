@@ -1,8 +1,12 @@
 import { getDb } from '$lib/server/db';
 import { listAllEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsByEvent, markRunSuperseded } from '$lib/server/db/queries/runs';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
 import { errorMessage } from '$lib/server/util';
 import { type ExecuteResult, executeExistingEventForWorkflow } from './executor';
+
+const log = createLogger('replay');
 
 export interface DispatchTally {
 	workflowId: string;
@@ -36,9 +40,9 @@ async function dispatchAndTally<T>(
 			}
 		} catch (error) {
 			result.failed += 1;
-			console.error('[dispatchAndTally] dispatch threw', {
+			log.error(EVENTS.DISPATCH_TALLY_THREW, {
 				error: errorMessage(error),
-				workflowId
+				workflow_id: workflowId
 			});
 		}
 	}
