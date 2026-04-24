@@ -219,7 +219,11 @@ function buildQueryBody(args: Args): Record<string, unknown> {
 	const from = parseTimestamp(args.since, now);
 	const to = args.until ? parseTimestamp(args.until, now) : now;
 
-	const filters: Array<{ key: string; operation: string; type: string; value: unknown }> = [];
+	type SimpleFilter = { key: string; operation: string; type: string; value: string };
+	type GroupFilter = { kind: 'group'; filterCombination: 'and' | 'or'; filters: SimpleFilter[] };
+	type Filter = SimpleFilter | GroupFilter;
+
+	const filters: Filter[] = [];
 	const pushEq = (key: string, value: string): void => {
 		filters.push({ key, operation: 'eq', type: 'string', value });
 	};
@@ -244,8 +248,22 @@ function buildQueryBody(args: Args): Record<string, unknown> {
 	const allowedLevels = (['debug', 'info', 'warn', 'error'] as const).filter(
 		(l) => levelOrder[l] >= minLevel
 	);
-	if (allowedLevels.length < 4) {
-		filters.push({ key: '$metadata.level', operation: 'in', type: 'string', value: allowedLevels });
+	// The telemetry API's filter schema is a union: each entry is either a
+	// simple { key, operation, type, value: string } or a group
+	// { kind: 'group', filterCombination, filters: [...] }. Multi-value OR
+	// must be expressed as the group form — a simple filter's `value` can't
+	// be an array.
+	if (allowedLevels.length > 0 && allowedLevels.length < 4) {
+		filters.push({
+			kind: 'group',
+			filterCombination: 'or',
+			filters: allowedLevels.map((l) => ({
+				key: '$metadata.level',
+				operation: 'eq',
+				type: 'string',
+				value: l
+			}))
+		});
 	}
 
 	return {
