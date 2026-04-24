@@ -1,12 +1,15 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { healWorkflow } from '$lib/server/agent/roles/heal';
 import {
+	HEAL_SWEEP_ABORT_THRESHOLD,
 	agentEventsToTranscript,
 	computeDiff,
-	deployHealedVersion,
-	runHealTestSweep
+	deployHealedVersion
 } from '$lib/server/healer/orchestrator';
+import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
 import { getDb } from '$lib/server/db';
+import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/events';
+import { getWorkflow } from '$lib/server/db/queries/workflows';
 import {
 	finishHealSession,
 	getHealSession,
@@ -17,7 +20,17 @@ import { createLogger } from '$lib/server/log';
 import { withLogContext } from '$lib/server/log-context';
 import { EVENTS } from '$lib/server/log-events';
 import { errorMessage } from '$lib/server/util';
-import type { HealTestResults, UnhealableCategory } from '$lib/server/db/types';
+import type {
+	HealTestResultDetail,
+	HealTestResults,
+	UnhealableCategory
+} from '$lib/server/db/types';
+
+// Conservative safety margin below the default 10,000-step-per-instance cap
+// (also under the 25,000 configurable ceiling). If a workflow has this many
+// historical events the sweep is likely pathological — we still run it, but
+// log a warning so ops can intervene before the hard cap is reached.
+const SWEEP_EVENT_WARN_THRESHOLD = 5000;
 
 const log = createLogger('heal-flow');
 
@@ -56,12 +69,15 @@ type AgentStepSummary =
 // Each heal_session row claimed by the executor must reach a terminal
 // status — otherwise the partial unique index permanently blocks future
 // heals for that workflow. Finalization layers, outer-to-inner:
-//   1. Per-step try/catch inside runInner (agent-heal / test-sweep /
-//      deploy-and-replay) writes a step-specific terminal status when a
+//   1. Per-step try/catch inside runInner (agent-heal / test-sweep framing
+//      / deploy-and-replay) writes a step-specific terminal status when a
 //      step.do throws after its configured retries exhaust. This is where
 //      nearly all legitimate failures land, and it preserves the
 //      informative `agent_failed` / `sweep_failed` / `deploy_failed`
-//      distinction in the row and the return value.
+//      distinction in the row and the return value. Note: individual
+//      per-event sweep steps absorb their own exhaustion into a failed
+//      tally entry, so `sweep_failed` here only fires if the framing
+//      `list-events-for-sweep` step itself exhausts.
 //   2. The outer catch in run() is a safety net for errors that escape
 //      outside any step.do (setup code, withLogContext plumbing, etc.).
 //      It writes a generic `failed` with a "heal-flow aborted" reason.
@@ -344,16 +360,14 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 
 		let sweepResults: HealTestResults & { abortedEarly: boolean };
 		try {
-			sweepResults = await step.do(
-				'test-sweep',
-				{ retries: { delay: '5 seconds', limit: 1 }, timeout: '10 minutes' },
-				(): Promise<HealTestResults & { abortedEarly: boolean }> =>
-					withLogContext({ step: 'test-sweep' }, async () => {
-						const sweep = await runHealTestSweep(env, workflowId, candidateSourceTs);
-						return { ...sweep.results, abortedEarly: sweep.abortedEarly };
-					})
-			);
+			sweepResults = await this.runPerEventSweep(step, {
+				candidateSourceTs,
+				workflowId
+			});
 		} catch (error) {
+			// Only reached if one of the sweep-framing steps (list-events,
+			// fetch-workflow) exhausts its own retries — the per-event steps
+			// each absorb their exhaustion into a failed tally entry below.
 			const message = errorMessage(error);
 			await this.finalizeSweepExhausted(
 				healSessionId,
@@ -451,6 +465,149 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 			healSessionId,
 			newVersionId: deployedVersionId,
 			status: 'success'
+		};
+	}
+
+	// Per-event test sweep. Each historical event becomes its own step.do so
+	// that (a) a single flaky event's retry doesn't re-run the whole sweep,
+	// (b) on Workflow replay the already-passed events are memoized, and
+	// (c) the workerd binding-materialization race is bounded to one event
+	// at a time. Cloudflare's own guidance is to avoid monolithic steps and
+	// to use dynamically-named per-item steps for loop bodies.
+	//
+	// Deterministic step names: `test-event-${uuid}` is stable across replay
+	// because event ids are stable uuids loaded via the list-events-for-sweep
+	// step (itself memoized).
+	private async runPerEventSweep(
+		step: WorkflowStep,
+		args: { workflowId: string; candidateSourceTs: string }
+	): Promise<HealTestResults & { abortedEarly: boolean }> {
+		const { workflowId, candidateSourceTs } = args;
+		const env = this.env;
+
+		// We return only event ids (scalar strings) across the step boundary
+		// because Event.payload is `unknown` and the Workflow RPC
+		// Serializable<T> constraint rejects unknown fields — even though in
+		// practice all stored payloads are JSON-derived. Each per-event step
+		// re-fetches its own Event + the Workflow row inside its callback,
+		// which is cheap (one D1 roundtrip each) and keeps everything
+		// memoized at the step granularity.
+		const eventIds = await step.do(
+			'list-events-for-sweep',
+			{ retries: { delay: '5 seconds', limit: 2 }, timeout: '30 seconds' },
+			(): Promise<string[]> =>
+				withLogContext({ step: 'list-events-for-sweep' }, async () => {
+					const evts = await listAllEventsForWorkflow(getDb(env), workflowId);
+					return evts.map((e) => e.id);
+				})
+		);
+
+		log.info(EVENTS.HEAL_SWEEP_START, {
+			workflow_id: workflowId,
+			total_events: eventIds.length
+		});
+		if (eventIds.length > SWEEP_EVENT_WARN_THRESHOLD) {
+			log.warn(EVENTS.HEAL_SWEEP_EVENT_COUNT_NEAR_CAP, {
+				workflow_id: workflowId,
+				count: eventIds.length,
+				threshold: SWEEP_EVENT_WARN_THRESHOLD
+			});
+		}
+
+		const details: HealTestResultDetail[] = [];
+		let passed = 0;
+		let failed = 0;
+		let abortedEarly = false;
+
+		for (let i = 0; i < eventIds.length; i++) {
+			const eventId = eventIds[i]!;
+			log.info(EVENTS.HEAL_SWEEP_EVENT_START, {
+				workflow_id: workflowId,
+				event_id: eventId,
+				event_index: i,
+				total_events: eventIds.length
+			});
+
+			// Per-event step: retries are bounded, and a retry memoization hit
+			// on replay short-circuits straight to the prior outcome.
+			let detail: HealTestResultDetail;
+			try {
+				detail = await step.do(
+					`test-event-${eventId}`,
+					{ retries: { delay: '5 seconds', limit: 1 }, timeout: '1 minute' },
+					(): Promise<HealTestResultDetail> =>
+						withLogContext({ step: 'test-event', event_id: eventId }, async () => {
+							const db = getDb(env);
+							const [event, workflow] = await Promise.all([
+								getEvent(db, eventId),
+								getWorkflow(db, workflowId)
+							]);
+							if (!event) {
+								throw new Error(`sweep: event disappeared mid-heal: ${eventId}`);
+							}
+							if (!workflow) {
+								throw new Error(`sweep: workflow disappeared mid-heal: ${workflowId}`);
+							}
+							const res = await runAgainstEventEphemeral(env, candidateSourceTs, event, workflow);
+							log.info(EVENTS.HEAL_SWEEP_EVENT_DONE, {
+								workflow_id: workflowId,
+								event_id: eventId,
+								event_index: i,
+								ok: res.ok,
+								duration_ms: res.durationMs
+							});
+							const d: HealTestResultDetail = { eventId, ok: res.ok };
+							if (!res.ok && res.error) {
+								d.error = res.error;
+							}
+							return d;
+						})
+				);
+			} catch (error) {
+				// Step exhausted its retries — classify as a failed tally
+				// entry (category: infra) instead of aborting the whole
+				// workflow. A single flaky upload/dispatch shouldn't sink a
+				// heal that would otherwise pass the other N-1 events.
+				const message = errorMessage(error);
+				log.warn(EVENTS.HEAL_SWEEP_EVENT_EXHAUSTED, {
+					workflow_id: workflowId,
+					event_id: eventId,
+					event_index: i,
+					error: message
+				});
+				detail = {
+					eventId,
+					ok: false,
+					error: { category: 'infra', message, name: 'SweepStepExhausted' }
+				};
+			}
+
+			details.push(detail);
+			if (detail.ok) {
+				passed += 1;
+			} else {
+				failed += 1;
+			}
+			if (failed >= HEAL_SWEEP_ABORT_THRESHOLD) {
+				abortedEarly = true;
+				break;
+			}
+		}
+
+		log.info(EVENTS.HEAL_SWEEP_END, {
+			workflow_id: workflowId,
+			passed,
+			failed,
+			aborted_early: abortedEarly,
+			total: eventIds.length
+		});
+
+		return {
+			abortedEarly,
+			details,
+			failed,
+			passed,
+			total: eventIds.length
 		};
 	}
 }

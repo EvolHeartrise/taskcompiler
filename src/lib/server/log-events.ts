@@ -26,10 +26,12 @@ export const EVENTS = {
 	HEAL_SLOT_RELEASED: 'heal.slot_released',
 	HEAL_SLOT_RELEASE_FAILED: 'heal.slot_release_failed',
 
-	// Post-heal test sweep (runHealTestSweep).
+	// Post-heal test sweep (per-event step.do loop in heal-flow.ts).
 	HEAL_SWEEP_START: 'heal.sweep.start',
 	HEAL_SWEEP_EVENT_START: 'heal.sweep.event_start',
 	HEAL_SWEEP_EVENT_DONE: 'heal.sweep.event_done',
+	HEAL_SWEEP_EVENT_EXHAUSTED: 'heal.sweep.event_exhausted',
+	HEAL_SWEEP_EVENT_COUNT_NEAR_CAP: 'heal.sweep.event_count_near_cap',
 	HEAL_SWEEP_END: 'heal.sweep.end',
 
 	// Ephemeral test-runner primitive (upload + invoke + delete).
