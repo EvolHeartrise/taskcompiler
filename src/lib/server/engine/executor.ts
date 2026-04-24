@@ -27,7 +27,7 @@ export interface ExecuteManualOptions {
 
 export interface WorkflowDispatchResult {
 	workflowId: string;
-	runId: string;
+	runId: string | null;
 	status: RunStatus;
 	result?: unknown;
 	error?: RunError;
@@ -141,7 +141,7 @@ export async function executeSourceEvent(
 	for (const workflow of workflows) {
 		if (!workflow.currentVersionId) {
 			dispatched.push({
-				runId: '',
+				runId: null,
 				skipped: 'no_current_version',
 				status: 'running',
 				workflowId: workflow.id
@@ -162,7 +162,7 @@ export async function executeSourceEvent(
 			console.error(`[executor] fanout dispatch failed for workflow=${workflow.id}: ${msg}`);
 			dispatched.push({
 				error: { category: 'infra', message: msg, name: 'DispatchThrew' },
-				runId: '',
+				runId: null,
 				status: 'failed',
 				workflowId: workflow.id
 			});
