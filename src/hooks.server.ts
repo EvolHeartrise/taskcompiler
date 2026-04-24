@@ -21,23 +21,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (!event.platform) {
 		return resolve(event);
 	}
-	const session = await auth().api.getSession({ headers: event.request.headers });
-	event.locals.user = session?.user
-		? {
-				id: session.user.id,
-				email: session.user.email,
-				name: session.user.name ?? session.user.email,
-				image: session.user.image ?? null
-			}
-		: null;
-	event.locals.session = session?.session
-		? {
-				id: session.session.id,
-				token: session.session.token,
-				expiresAt: session.session.expiresAt,
-				userId: session.session.userId
-			}
-		: null;
+	const result = await auth().api.getSession({ headers: event.request.headers });
+	event.locals.user = result?.user ?? null;
+	event.locals.session = result?.session ?? null;
 
 	if (!event.locals.user && !isPublic(event.url.pathname)) {
 		const next = event.url.pathname + event.url.search;
