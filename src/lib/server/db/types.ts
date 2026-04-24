@@ -142,3 +142,24 @@ export interface ProjectSecretMeta {
 	createdAt: number;
 	updatedAt: number;
 }
+
+export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export interface Invite {
+	id: string;
+	projectId: string;
+	email: string;
+	token: string;
+	invitedBy: string;
+	status: InviteStatus;
+	expiresAt: number;
+	createdAt: number;
+}
+
+export interface ProjectMember {
+	userId: string;
+	name: string;
+	email: string;
+	role: 'owner' | 'member';
+	joinedAt: number;
+}

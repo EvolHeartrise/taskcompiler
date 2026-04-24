@@ -18,6 +18,9 @@ function isPublic(pathname: string): boolean {
 	if (pathname === '/api/dev/cron-tick') {
 		return true; // dev-only trigger
 	}
+	if (pathname.startsWith('/invite/')) {
+		return true; // invite landing page renders for anonymous visitors
+	}
 	return false;
 }
 
