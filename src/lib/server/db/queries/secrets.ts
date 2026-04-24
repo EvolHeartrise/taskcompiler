@@ -1,5 +1,5 @@
 import { getDb, now } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { fetchAll, mapRow } from '../mappers.ts';
 import type { ProjectSecretMeta } from '../types.ts';
 
 interface ProjectSecretMetaRow {
@@ -16,14 +16,14 @@ export function isValidSecretName(name: string): boolean {
 }
 
 export async function listSecretNamesForProject(projectId: string): Promise<ProjectSecretMeta[]> {
-	const res = await getDb()
-		.prepare(
-			`SELECT project_id, name, created_at, updated_at
-			 FROM project_secrets WHERE project_id = ? ORDER BY name ASC`
-		)
-		.bind(projectId)
-		.all<ProjectSecretMetaRow>();
-	return res.results.map((row) => mapRow<ProjectSecretMeta>(row));
+	return fetchAll<ProjectSecretMetaRow, ProjectSecretMeta>(
+		getDb()
+			.prepare(
+				`SELECT project_id, name, created_at, updated_at
+				 FROM project_secrets WHERE project_id = ? ORDER BY name ASC`
+			)
+			.bind(projectId)
+	);
 }
 
 export async function upsertSecret(

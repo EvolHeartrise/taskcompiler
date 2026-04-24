@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { fetchAll, fetchOne } from '../mappers.ts';
 import type { Workflow } from '../types.ts';
 
 interface WorkflowRow {
@@ -46,38 +46,34 @@ export async function createWorkflow(input: CreateWorkflowInput): Promise<Workfl
 // System-level lookup (cron/webhook/executor/heal). Does not enforce project_id;
 // Callers already trust the id. Prefer `getWorkflowForProject` in UI code paths.
 export async function getWorkflow(id: string): Promise<Workflow | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM workflows WHERE id = ?`)
-		.bind(id)
-		.first<WorkflowRow>();
-	return row ? mapRow<Workflow>(row) : null;
+	return fetchOne<WorkflowRow, Workflow>(
+		getDb().prepare(`SELECT * FROM workflows WHERE id = ?`).bind(id)
+	);
 }
 
 export async function getWorkflowForProject(
 	id: string,
 	projectId: string
 ): Promise<Workflow | null> {
-	const row = await getDb()
-		.prepare(`SELECT * FROM workflows WHERE id = ? AND project_id = ?`)
-		.bind(id, projectId)
-		.first<WorkflowRow>();
-	return row ? mapRow<Workflow>(row) : null;
+	return fetchOne<WorkflowRow, Workflow>(
+		getDb().prepare(`SELECT * FROM workflows WHERE id = ? AND project_id = ?`).bind(id, projectId)
+	);
 }
 
 export async function listWorkflowsForProject(projectId: string): Promise<Workflow[]> {
-	const res = await getDb()
-		.prepare(`SELECT * FROM workflows WHERE project_id = ? ORDER BY created_at DESC`)
-		.bind(projectId)
-		.all<WorkflowRow>();
-	return res.results.map((r) => mapRow<Workflow>(r));
+	return fetchAll<WorkflowRow, Workflow>(
+		getDb()
+			.prepare(`SELECT * FROM workflows WHERE project_id = ? ORDER BY created_at DESC`)
+			.bind(projectId)
+	);
 }
 
 export async function listWorkflowsForEventSource(eventSourceId: string): Promise<Workflow[]> {
-	const res = await getDb()
-		.prepare(`SELECT * FROM workflows WHERE event_source_id = ? ORDER BY created_at DESC`)
-		.bind(eventSourceId)
-		.all<WorkflowRow>();
-	return res.results.map((r) => mapRow<Workflow>(r));
+	return fetchAll<WorkflowRow, Workflow>(
+		getDb()
+			.prepare(`SELECT * FROM workflows WHERE event_source_id = ? ORDER BY created_at DESC`)
+			.bind(eventSourceId)
+	);
 }
 
 // Batched workflow counts per source for a project — one query instead of N
