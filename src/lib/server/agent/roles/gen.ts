@@ -1,12 +1,10 @@
 import { type AgentEvent, type AgentRunResult, DEFAULT_MODEL, runAgent } from '../loop.ts';
-import type { Tool } from '../tools.ts';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { getWorkflow } from '$lib/server/db/queries/workflows';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { createVersion } from '$lib/server/db/queries/versions';
 import { writeVersion } from '$lib/server/workflows-store';
-import { typecheckWorkflow } from '../typecheck/service';
-import { EmitSuccess, wrapTerminal } from './shared.ts';
+import { makeTypecheckedEmitTool, wrapTerminal } from './shared.ts';
 import type { TriggerType } from '$lib/server/db/types';
 
 export interface GenerateWorkflowOptions {
@@ -106,67 +104,6 @@ function formatTrigger(triggerType: TriggerType, cronExpr: string | null): strin
 	return 'webhook';
 }
 
-function makeEmitTool(
-	state: { attempts: number; emitted: EmittedPayload | null },
-	maxAttempts: number,
-	secretNames: readonly string[]
-): Tool {
-	return {
-		description:
-			'Deliver the generated workflow. Call this EXACTLY ONCE with the full TypeScript module source and a one-sentence summary. This is the only way to finish the task.',
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				source_ts: {
-					description:
-						'Full TypeScript source of the workflow module. Must export a default async function `run(event, ctx)`.',
-					type: 'string'
-				},
-				summary: {
-					description: 'One-sentence summary of what the workflow does.',
-					type: 'string'
-				}
-			},
-			required: ['source_ts', 'summary'],
-			type: 'object'
-		},
-		name: 'emit_workflow',
-		async run(input: unknown): Promise<string> {
-			if (input === null || typeof input !== 'object') {
-				throw new Error('emit_workflow: expected an object input');
-			}
-			const obj = input as Record<string, unknown>;
-			const source = obj.source_ts;
-			const { summary } = obj;
-			if (typeof source !== 'string') {
-				throw new TypeError('emit_workflow: `source_ts` must be a string');
-			}
-			if (typeof summary !== 'string') {
-				throw new TypeError('emit_workflow: `summary` must be a string');
-			}
-			state.attempts += 1;
-			const tc = typecheckWorkflow(secretNames, source);
-			if (!tc.ok) {
-				const details = tc.diagnostics.join('\n');
-				if (state.attempts >= maxAttempts) {
-					throw new Error(
-						`TypeScript errors in emitted source (max emit attempts (${maxAttempts}) exhausted):\n${details}`
-					);
-				}
-				throw new Error(
-					`TypeScript errors in emitted source. Fix them and call emit_workflow again:\n${details}`
-				);
-			}
-			state.emitted = { sourceTs: source, summary };
-			// Signal the loop to stop by throwing a sentinel the outer abort handler
-			// Catches. But tools can't stop the loop directly — instead we rely on the
-			// Assistant getting a success response and then issuing end_turn. Return
-			// A success message telling it the task is complete.
-			throw new EmitSuccess(state.emitted);
-		}
-	};
-}
-
 export async function generateWorkflow(
 	opts: GenerateWorkflowOptions
 ): Promise<GenerateWorkflowResult> {
@@ -191,7 +128,15 @@ export async function generateWorkflow(
 	const userMessage = buildUserMessage(opts, source.triggerType, source.cronExpr, secretNames);
 
 	const emitTool = wrapTerminal<EmittedPayload>(
-		makeEmitTool(emitState, maxEmitAttempts, secretNames),
+		makeTypecheckedEmitTool<EmittedPayload>({
+			name: 'emit_workflow',
+			description:
+				'Deliver the generated workflow. Call this EXACTLY ONCE with the full TypeScript module source and a one-sentence summary. This is the only way to finish the task.',
+			secretNames,
+			maxAttempts: maxEmitAttempts,
+			state: emitState,
+			buildPayload: ({ sourceTs, summary }) => ({ sourceTs, summary })
+		}),
 		controller,
 		(payload) => `ok: workflow received (${payload.summary})`
 	);

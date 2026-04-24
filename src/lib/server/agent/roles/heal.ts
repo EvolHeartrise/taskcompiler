@@ -7,8 +7,7 @@ import { getEvent, listAllEventsForWorkflow } from '$lib/server/db/queries/event
 import { getRun, listFailedRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { listSecretNamesForProject } from '$lib/server/db/queries/secrets';
 import { runAgainstEventEphemeral } from '$lib/server/engine/test-runner';
-import { typecheckWorkflow } from '../typecheck/service';
-import { EmitSuccess, wrapTerminal } from './shared.ts';
+import { EmitSuccess, makeTypecheckedEmitTool, wrapTerminal } from './shared.ts';
 import type { Event, RunError, RunLogEntry, UnhealableCategory } from '$lib/server/db/types';
 import { errorMessage, truncate } from '$lib/server/util';
 
@@ -367,63 +366,6 @@ function makeRunTestEventTool(workflowId: string): Tool {
 	});
 }
 
-function makeEmitFixedWorkflowTool(
-	state: { attempts: number; emitted: EmittedPayload | null },
-	maxAttempts: number,
-	secretNames: readonly string[]
-): Tool {
-	return {
-		description:
-			'Deliver the corrected workflow. Call this EXACTLY ONCE with the full TypeScript module source and a short summary of the fix. This is the only way to finish the task for a code-fixable failure.',
-		inputSchema: {
-			additionalProperties: false,
-			properties: {
-				source_ts: {
-					description:
-						'Full TypeScript source of the corrected workflow module. Must export a default async function `run(event, ctx)`.',
-					type: 'string'
-				},
-				summary: {
-					description: 'One-sentence summary of the fix (what was wrong, what changed).',
-					type: 'string'
-				}
-			},
-			required: ['source_ts', 'summary'],
-			type: 'object'
-		},
-		name: 'emit_fixed_workflow',
-		async run(input: unknown): Promise<string> {
-			if (input === null || typeof input !== 'object') {
-				throw new Error('emit_fixed_workflow: expected an object input');
-			}
-			const obj = input as Record<string, unknown>;
-			const source = obj.source_ts;
-			const { summary } = obj;
-			if (typeof source !== 'string') {
-				throw new TypeError('emit_fixed_workflow: `source_ts` must be a string');
-			}
-			if (typeof summary !== 'string') {
-				throw new TypeError('emit_fixed_workflow: `summary` must be a string');
-			}
-			state.attempts += 1;
-			const tc = typecheckWorkflow(secretNames, source);
-			if (!tc.ok) {
-				const details = tc.diagnostics.join('\n');
-				if (state.attempts >= maxAttempts) {
-					throw new Error(
-						`TypeScript errors in emitted source (max emit attempts (${maxAttempts}) exhausted):\n${details}`
-					);
-				}
-				throw new Error(
-					`TypeScript errors in emitted source. Fix them and call emit_fixed_workflow again:\n${details}`
-				);
-			}
-			state.emitted = { kind: 'fixed', sourceTs: source, summary };
-			throw new EmitSuccess(state.emitted);
-		}
-	};
-}
-
 function makeEmitUnhealableTool(state: { emitted: EmittedPayload | null }): Tool {
 	return defineTool<{ category: UnhealableCategory; reason: string }>({
 		name: 'emit_unhealable',
@@ -512,7 +454,15 @@ export async function healWorkflow(opts: HealOptions): Promise<HealOutcome> {
 		makeGetRunTool(opts.workflowId),
 		makeRunTestEventTool(opts.workflowId),
 		wrapTerminal<EmittedPayload>(
-			makeEmitFixedWorkflowTool(emitState, 2, secretNames),
+			makeTypecheckedEmitTool<EmittedPayload>({
+				name: 'emit_fixed_workflow',
+				description:
+					'Deliver the corrected workflow. Call this EXACTLY ONCE with the full TypeScript module source and a short summary of the fix. This is the only way to finish the task for a code-fixable failure.',
+				secretNames,
+				maxAttempts: 2,
+				state: emitState,
+				buildPayload: ({ sourceTs, summary }) => ({ kind: 'fixed', sourceTs, summary })
+			}),
 			controller,
 			formatTerminal
 		),
