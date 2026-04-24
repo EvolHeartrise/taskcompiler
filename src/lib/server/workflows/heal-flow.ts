@@ -77,6 +77,19 @@ export class HealWorkflowFlow extends WorkflowEntrypoint<Env, HealWorkflowParams
 	): Promise<HealWorkflowResult> {
 		const { workflowId, triggeringRunId, healSessionId } = event.payload;
 
+		// Force workerd to materialize the dispatch-namespace binding in the
+		// workflow's main scope before any step.do checkpoint. Without this,
+		// second-and-later step.do callbacks that go on to touch
+		// env.DISPATCHER (via runAgainstEventEphemeral → invokeDispatcher)
+		// can hit a workerd race where the inner work succeeds but the
+		// workflow engine never observes the callback resolving — the step
+		// sits in Working until its timeout. Originally diagnosed + fixed in
+		// 83a65c7, dropped in 103a0ce on the (incorrect) assumption that
+		// threading env explicitly through call args was sufficient. It
+		// isn't: threading affects JS scope, not workerd's binding-proxy
+		// materialization timing. Re-added here with the same rationale.
+		void this.env.DISPATCHER;
+
 		return withLogContext(
 			{
 				context: 'heal-flow',
