@@ -26,6 +26,20 @@ export const EVENTS = {
 	HEAL_SLOT_RELEASED: 'heal.slot_released',
 	HEAL_SLOT_RELEASE_FAILED: 'heal.slot_release_failed',
 
+	// Post-heal test sweep (runHealTestSweep).
+	HEAL_SWEEP_START: 'heal.sweep.start',
+	HEAL_SWEEP_EVENT_START: 'heal.sweep.event_start',
+	HEAL_SWEEP_EVENT_DONE: 'heal.sweep.event_done',
+	HEAL_SWEEP_END: 'heal.sweep.end',
+
+	// Ephemeral test-runner primitive (upload + invoke + delete).
+	TEST_RUNNER_UPLOAD_START: 'test_runner.upload_start',
+	TEST_RUNNER_UPLOAD_DONE: 'test_runner.upload_done',
+	TEST_RUNNER_INVOKE_START: 'test_runner.invoke_start',
+	TEST_RUNNER_INVOKE_DONE: 'test_runner.invoke_done',
+	TEST_RUNNER_DELETE_START: 'test_runner.delete_start',
+	TEST_RUNNER_DELETE_DONE: 'test_runner.delete_done',
+
 	// Agent-harness submit_candidate_source loop (heal role).
 	HEAL_SUBMIT_STARTED: 'heal.submit.started',
 	HEAL_SUBMIT_EVENT_PASSED: 'heal.submit.event_passed',
