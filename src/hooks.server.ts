@@ -1,4 +1,7 @@
 import { redirect, type Handle } from '@sveltejs/kit';
+import { sequence } from '@sveltejs/kit/hooks';
+import { svelteKitHandler } from 'better-auth/svelte-kit';
+import { building } from '$app/environment';
 import { auth } from '$lib/server/auth';
 
 function isPublic(pathname: string): boolean {
@@ -17,7 +20,10 @@ function isPublic(pathname: string): boolean {
 	return false;
 }
 
-export const handle: Handle = async ({ event, resolve }) => {
+const authHandler: Handle = ({ event, resolve }) =>
+	svelteKitHandler({ event, resolve, auth: auth(), building });
+
+const sessionHandler: Handle = async ({ event, resolve }) => {
 	if (!event.platform) {
 		return resolve(event);
 	}
@@ -32,3 +38,5 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	return resolve(event);
 };
+
+export const handle: Handle = sequence(authHandler, sessionHandler);
