@@ -14,6 +14,19 @@ export async function fetchAll<R extends object, D>(stmt: D1PreparedStatement): 
 	return res.results.map((r) => mapRow<D>(r));
 }
 
+// Build a complete D from a row plus hand-layered fields. Maps the row to
+// its camelCase shape (skipping any source columns the caller is about to
+// layer on top), then merges the layered fields. Use this when domain
+// fields need a transform mapRow can't do — JSON parsing, boolean coercion,
+// camel-renames that don't follow snake_case rules.
+export function rowToDomain<R extends object, D>(
+	row: R,
+	skipCols: readonly string[],
+	layers: Partial<D>
+): D {
+	return { ...mapRow<Partial<D>>(row, skipCols), ...layers } as D;
+}
+
 // Convert a snake_case row from D1 to its camelCase domain shape. Pass
 // `skip` to exclude columns the caller will layer on top (JSON-decoded or
 // boolean-coerced fields); the returned object is cast to the caller's

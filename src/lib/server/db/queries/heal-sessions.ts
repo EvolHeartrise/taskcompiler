@@ -1,5 +1,5 @@
 import { getDb, now, uuid } from '../index.ts';
-import { mapRow } from '../mappers.ts';
+import { rowToDomain } from '../mappers.ts';
 import { parseJson } from '$lib/server/util';
 import type {
 	HealAgentTranscriptEntry,
@@ -28,11 +28,10 @@ interface HealSessionRow {
 const HEAL_JSON_COLS = ['test_results_json', 'agent_transcript_json'] as const;
 
 function rowToHealSession(row: HealSessionRow): HealSession {
-	return {
-		...mapRow<Omit<HealSession, 'testResults' | 'agentTranscript'>>(row, HEAL_JSON_COLS),
+	return rowToDomain<HealSessionRow, HealSession>(row, HEAL_JSON_COLS, {
 		agentTranscript: parseJson<HealAgentTranscriptEntry[]>(row.agent_transcript_json),
 		testResults: parseJson<HealTestResults>(row.test_results_json)
-	};
+	});
 }
 
 export interface CreateHealSessionInput {
