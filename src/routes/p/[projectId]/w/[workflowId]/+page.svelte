@@ -5,7 +5,7 @@
 	import type { PageProps } from './$types';
 	import type { Event, HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
 	import { deleteWorkflow, getInFlight, resumeWorkflow, triggerWorkflow } from './data.remote';
-	import LocalTime from '$lib/LocalTime.svelte';
+	import LocalTime, { utcLabel } from '$lib/LocalTime.svelte';
 
 	let { data }: PageProps = $props();
 	let projectId = $derived(page.params.projectId!);
@@ -742,7 +742,7 @@
 					>
 						{#each data.versions as v (v.id)}
 							<option value={v.id} selected={selectedVersion?.id === v.id}>
-								v{v.version} · {v.createdBy} · <LocalTime ms={v.createdAt} />
+								v{v.version} · {v.createdBy} · {utcLabel(v.createdAt)}
 								{v.id === data.currentVersion?.id ? '(current)' : ''}
 							</option>
 						{/each}

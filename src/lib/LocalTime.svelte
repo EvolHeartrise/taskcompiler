@@ -1,7 +1,4 @@
-<script lang="ts">
-	type Props = { ms: number | null | undefined };
-	let { ms }: Props = $props();
-
+<script module lang="ts">
 	function pad(n: number): string {
 		return String(n).padStart(2, '0');
 	}
@@ -9,10 +6,15 @@
 	// Canonical UTC fallback. Same format the client will render, just in UTC — so
 	// the width matches the post-mount string character-for-character when the
 	// browser's default formatter picks a similar shape.
-	function utcFallback(ts: number): string {
+	export function utcLabel(ts: number): string {
 		const d = new Date(ts);
 		return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
 	}
+</script>
+
+<script lang="ts">
+	type Props = { ms: number | null | undefined };
+	let { ms }: Props = $props();
 
 	function localLabel(ts: number): string {
 		return new Date(ts).toLocaleString();
@@ -26,7 +28,7 @@
 	});
 
 	// Initial value (mounted=false) matches SSR. Post-mount, re-derives as localLabel.
-	let label = $derived(ms == null ? '—' : mounted ? localLabel(ms) : utcFallback(ms));
+	let label = $derived(ms == null ? '—' : mounted ? localLabel(ms) : utcLabel(ms));
 	let iso = $derived(ms == null ? null : new Date(ms).toISOString());
 </script>
 
