@@ -1,28 +1,29 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { PageProps } from './$types';
 	import type { Event, HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
+	import { deleteWorkflow, getInFlight, resumeWorkflow, triggerWorkflow } from './data.remote';
 
-	let { data, form }: PageProps = $props();
+	let { data }: PageProps = $props();
 	let projectId = $derived(page.params.projectId!);
+	let workflowId = $derived(data.workflow.id);
+
+	let inFlightQuery = $derived(getInFlight({ projectId, workflowId }));
+	let inFlight = $derived(inFlightQuery.current ?? {});
 
 	let genInFlight = $derived(
-		data.inFlight.gen?.status === 'running' || data.inFlight.gen?.status === 'queued'
+		inFlight.gen?.status === 'running' || inFlight.gen?.status === 'queued'
 	);
 	let healInFlight = $derived(
-		data.inFlight.heal?.status === 'running' || data.inFlight.heal?.status === 'queued'
+		inFlight.heal?.status === 'running' || inFlight.heal?.status === 'queued'
 	);
 	let anyInFlight = $derived(genInFlight || healInFlight);
 
 	$effect(() => {
 		if (!anyInFlight) return;
-		const id = setInterval(() => {
-			void invalidateAll();
-		}, 3000);
+		const id = setInterval(() => void getInFlight({ projectId, workflowId }).refresh(), 3000);
 		return () => clearInterval(id);
 	});
 
@@ -129,9 +130,9 @@
 		return data.events.find((e) => e.id === eventId);
 	}
 
-	const triggerResult = $derived(form?.trigger);
-	const resumeResult = $derived(form?.resume);
-	const deleteResult = $derived(form?.delete);
+	let triggerResult = $state<Awaited<ReturnType<typeof triggerWorkflow>> | null>(null);
+	const resumeResult = $derived(resumeWorkflow.result);
+	const deleteResult = $derived(deleteWorkflow.result);
 
 	let deleteConfirmName = $state('');
 	let canDelete = $derived(deleteConfirmName === data.workflow.name);
@@ -149,10 +150,18 @@
 	// SvelteKit's default form handling closes the dialog even on error; re-open
 	// it so the user sees the error message.
 	$effect(() => {
-		if (deleteResult && 'error' in deleteResult) {
+		if (deleteResult && deleteResult.ok === false) {
 			deleteDialog?.showModal();
 		}
 	});
+
+	async function runTrigger() {
+		try {
+			triggerResult = await triggerWorkflow({ projectId, workflowId, payload: triggerPayload });
+		} catch (err) {
+			triggerResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
+		}
+	}
 
 	const UNHEALABLE_LABELS: Record<string, string> = {
 		third_party_outage: 'Third-party outage',
@@ -234,23 +243,17 @@
 				? ''
 				: 's'}.
 		</p>
-		<form
-			method="POST"
-			action="?/resume"
-			use:enhance={() => {
-				return async ({ update }) => {
-					await update({ reset: false });
-				};
-			}}
-		>
+		<form {...resumeWorkflow}>
+			<input type="hidden" name="projectId" value={projectId} />
+			<input type="hidden" name="workflowId" value={workflowId} />
 			<button class="btn primary" type="submit">Resume and retry failed events</button>
 		</form>
 		{#if resumeResult}
-			{#if 'ok' in resumeResult && resumeResult.ok}
+			{#if resumeResult.ok}
 				<div class="result ok">
 					Resolved. Attempted: {resumeResult.attempted} · OK: {resumeResult.okCount} · Failed: {resumeResult.failedCount}
 				</div>
-			{:else if 'error' in resumeResult}
+			{:else}
 				<div class="alert">{resumeResult.error}</div>
 			{/if}
 		{/if}
@@ -263,13 +266,11 @@
 			<strong>Generating workflow…</strong>
 			<span class="muted small">This page auto-refreshes every 3 seconds.</span>
 		</div>
-	{:else if data.inFlight.gen?.status === 'errored'}
+	{:else if inFlight.gen?.status === 'errored'}
 		<div class="banner banner-error">
 			<strong>Generation failed</strong>
-			{#if data.inFlight.gen.error}
-				<span class="muted small"
-					>{data.inFlight.gen.error.name}: {data.inFlight.gen.error.message}</span
-				>
+			{#if inFlight.gen.error}
+				<span class="muted small">{inFlight.gen.error.name}: {inFlight.gen.error.message}</span>
 			{/if}
 		</div>
 	{/if}
@@ -339,12 +340,9 @@
 		<div class="card">
 			<h2>Manual trigger</h2>
 			<form
-				method="POST"
-				action="?/trigger"
-				use:enhance={() => {
-					return async ({ update }) => {
-						await update({ reset: false });
-					};
+				onsubmit={(e) => {
+					e.preventDefault();
+					void runTrigger();
 				}}
 			>
 				<label class="field">
@@ -354,7 +352,7 @@
 				<button class="btn primary" type="submit">Trigger</button>
 			</form>
 			{#if triggerResult}
-				{#if 'ok' in triggerResult && triggerResult.ok}
+				{#if triggerResult.ok}
 					<div
 						class="result"
 						class:ok={triggerResult.status === 'ok'}
@@ -376,7 +374,7 @@
 							</details>
 						{/if}
 					</div>
-				{:else if 'error' in triggerResult}
+				{:else}
 					<div class="alert">{triggerResult.error}</div>
 				{/if}
 			{/if}
@@ -397,15 +395,9 @@
 {/if}
 
 <dialog bind:this={deleteDialog} class="delete-dialog" onclose={() => (deleteConfirmName = '')}>
-	<form
-		method="POST"
-		action="?/delete"
-		use:enhance={() => {
-			return async ({ update }) => {
-				await update({ reset: false });
-			};
-		}}
-	>
+	<form {...deleteWorkflow}>
+		<input type="hidden" name="projectId" value={projectId} />
+		<input type="hidden" name="workflowId" value={workflowId} />
 		<h2>Delete workflow</h2>
 		<p>
 			Permanently delete <b>{data.workflow.name}</b> and everything it owns — every version, every deployed
@@ -421,7 +413,7 @@
 				spellcheck="false"
 			/>
 		</label>
-		{#if deleteResult && 'error' in deleteResult}
+		{#if deleteResult && deleteResult.ok === false}
 			<div class="alert">{deleteResult.error}</div>
 		{/if}
 		<div class="dialog-actions">
