@@ -1,27 +1,33 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
-	import type { PageProps } from './$types';
+	import { createWorkflowAndGenerate, getEventSourcesWithCounts } from './data.remote';
 
-	let { data, form }: PageProps = $props();
 	let projectId = $derived(page.params.projectId!);
+	let preselectedSourceId = $derived(page.url.searchParams.get('source'));
 
-	const initial = untrack(() => form);
-	const initialData = untrack(() => data);
+	const sourcesQuery = $derived(getEventSourcesWithCounts({ projectId, preselectedSourceId }));
+
+	const initial = untrack(() => createWorkflowAndGenerate.result);
 	let name = $state(initial?.values?.name ?? '');
 	let prompt = $state(initial?.values?.prompt ?? '');
-	let sourceId = $state(
-		initial?.values?.sourceId ??
-			initialData.preselectedSourceId ??
-			initialData.eventSources[0]?.id ??
-			''
-	);
+	let sourceId = $state(initial?.values?.sourceId ?? '');
 	let backfill = $state(Boolean(initial?.values?.backfill));
 	let submitting = $state(false);
 
-	let selectedSource = $derived(data.eventSources.find((s) => s.id === sourceId));
+	const result = $derived(createWorkflowAndGenerate.result);
+
+	// Once the sources query resolves, default the select if the user hasn't
+	// chosen one yet (and the form didn't repopulate from an error).
+	$effect(() => {
+		if (sourceId !== '') return;
+		void sourcesQuery.then((d) => {
+			if (sourceId === '') {
+				sourceId = d.preselectedSourceId ?? d.eventSources[0]?.id ?? '';
+			}
+		});
+	});
 
 	function triggerLabel(t: string, cron: string | null): string {
 		if (t === 'cron') return cron ? `cron (${cron})` : 'cron';
@@ -40,104 +46,111 @@
 	<a href={resolve('/p/[projectId]', { projectId })} class="back">← Back</a>
 </div>
 
-{#if data.eventSources.length === 0}
-	<div class="empty">
-		<p>No events yet. Workflows attach to an event source (webhook or cron schedule).</p>
-		<p>
-			<a href={resolve('/p/[projectId]/sources/new', { projectId })}>Create an event first</a>, then
-			come back here.
-		</p>
-	</div>
-{:else if submitting}
-	<div class="generating">
-		<div class="spinner" aria-hidden="true"></div>
-		<div>
-			<div class="strong">Generating workflow…</div>
-			<div class="muted">This can take 10–30 seconds while the agent writes your module.</div>
-			{#if prompt}
-				<blockquote>{prompt}</blockquote>
-			{/if}
+{#await sourcesQuery}
+	<div class="muted">Loading event sources…</div>
+{:then data}
+	{@const selectedSource = data.eventSources.find((s) => s.id === sourceId)}
+
+	{#if data.eventSources.length === 0}
+		<div class="empty">
+			<p>No events yet. Workflows attach to an event source (webhook or cron schedule).</p>
+			<p>
+				<a href={resolve('/p/[projectId]/sources/new', { projectId })}>Create an event first</a>,
+				then come back here.
+			</p>
 		</div>
-	</div>
-{:else}
-	{#if form?.error}
-		<div class="alert">{form.error}</div>
-	{/if}
-
-	<form
-		method="POST"
-		use:enhance={() => {
-			submitting = true;
-			return async ({ update }) => {
-				await update({ reset: false });
-				submitting = false;
-			};
-		}}
-	>
-		<label class="field">
-			<span>Event source</span>
-			<select name="sourceId" bind:value={sourceId} required>
-				{#each data.eventSources as s (s.id)}
-					<option value={s.id}>
-						{s.name} · {triggerLabel(s.triggerType, s.cronExpr)} · {s.eventCount} event{s.eventCount ===
-						1
-							? ''
-							: 's'}
-					</option>
-				{/each}
-			</select>
-			<span class="hint">
-				Every event from this source will fan out to this workflow (plus any siblings).
-			</span>
-		</label>
-
-		<label class="field">
-			<span>Name</span>
-			<input
-				name="name"
-				type="text"
-				bind:value={name}
-				placeholder="daily-digest-to-slack"
-				required
-			/>
-		</label>
-
-		<label class="field">
-			<span>Prompt</span>
-			<textarea
-				name="prompt"
-				rows="8"
-				placeholder="Post the top 5 items from the incoming payload to the Slack webhook SLACK_WEBHOOK."
-				bind:value={prompt}
-				required
-			></textarea>
-		</label>
-
-		{#if selectedSource && selectedSource.eventCount > 0}
-			<label class="field checkbox">
-				<input type="checkbox" name="backfill" bind:checked={backfill} />
-				<span>
-					<b
-						>Backfill against {selectedSource.eventCount} historical event{selectedSource.eventCount ===
-						1
-							? ''
-							: 's'}</b
-					>
-					<span class="hint">
-						After generation, run the new workflow against every past event on this source as replay
-						runs. Useful for graceful handover from an older workflow — the new one inherits the
-						source's history.
-					</span>
-				</span>
-			</label>
+	{:else if submitting}
+		<div class="generating">
+			<div class="spinner" aria-hidden="true"></div>
+			<div>
+				<div class="strong">Generating workflow…</div>
+				<div class="muted">This can take 10–30 seconds while the agent writes your module.</div>
+				{#if prompt}
+					<blockquote>{prompt}</blockquote>
+				{/if}
+			</div>
+		</div>
+	{:else}
+		{#if result?.error}
+			<div class="alert">{result.error}</div>
 		{/if}
 
-		<div class="actions">
-			<a href={resolve('/p/[projectId]', { projectId })} class="btn">Cancel</a>
-			<button class="btn primary" type="submit">Generate workflow</button>
-		</div>
-	</form>
-{/if}
+		<form
+			{...createWorkflowAndGenerate.enhance(async ({ submit }) => {
+				submitting = true;
+				try {
+					await submit();
+				} finally {
+					submitting = false;
+				}
+			})}
+		>
+			<input type="hidden" name="projectId" value={projectId} />
+			<label class="field">
+				<span>Event source</span>
+				<select name="sourceId" bind:value={sourceId} required>
+					{#each data.eventSources as s (s.id)}
+						<option value={s.id}>
+							{s.name} · {triggerLabel(s.triggerType, s.cronExpr)} · {s.eventCount} event{s.eventCount ===
+							1
+								? ''
+								: 's'}
+						</option>
+					{/each}
+				</select>
+				<span class="hint">
+					Every event from this source will fan out to this workflow (plus any siblings).
+				</span>
+			</label>
+
+			<label class="field">
+				<span>Name</span>
+				<input
+					name="name"
+					type="text"
+					bind:value={name}
+					placeholder="daily-digest-to-slack"
+					required
+				/>
+			</label>
+
+			<label class="field">
+				<span>Prompt</span>
+				<textarea
+					name="prompt"
+					rows="8"
+					placeholder="Post the top 5 items from the incoming payload to the Slack webhook SLACK_WEBHOOK."
+					bind:value={prompt}
+					required
+				></textarea>
+			</label>
+
+			{#if selectedSource && selectedSource.eventCount > 0}
+				<label class="field checkbox">
+					<input type="checkbox" name="backfill" bind:checked={backfill} />
+					<span>
+						<b
+							>Backfill against {selectedSource.eventCount} historical event{selectedSource.eventCount ===
+							1
+								? ''
+								: 's'}</b
+						>
+						<span class="hint">
+							After generation, run the new workflow against every past event on this source as
+							replay runs. Useful for graceful handover from an older workflow — the new one
+							inherits the source's history.
+						</span>
+					</span>
+				</label>
+			{/if}
+
+			<div class="actions">
+				<a href={resolve('/p/[projectId]', { projectId })} class="btn">Cancel</a>
+				<button class="btn primary" type="submit">Generate workflow</button>
+			</div>
+		</form>
+	{/if}
+{/await}
 
 <style>
 	.page-head {

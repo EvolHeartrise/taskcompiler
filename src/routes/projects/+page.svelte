@@ -1,9 +1,6 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
-	import type { PageProps } from './$types';
-
-	let { data, form }: PageProps = $props();
+	import { createProject, getProjects, renameProject } from './data.remote';
 
 	let newName = $state('');
 	let renaming = $state<Record<string, string>>({});
@@ -12,8 +9,9 @@
 		return new Date(ts).toLocaleString();
 	}
 
-	const createResult = $derived(form?.create);
-	const renameResult = $derived(form?.rename);
+	const projectsQuery = $derived(getProjects());
+	const createResult = $derived(createProject.result);
+	const renameResult = $derived(renameProject.result);
 </script>
 
 <svelte:head><title>Projects · Runely</title></svelte:head>
@@ -28,27 +26,25 @@
 	</div>
 </div>
 
-{#if createResult && 'error' in createResult}
+{#if createResult?.error}
 	<div class="alert">{createResult.error}</div>
 {/if}
 
-{#if renameResult && 'ok' in renameResult && renameResult.ok}
-	<div class="result ok">Renamed to <b>{renameResult.name}</b>.</div>
-{:else if renameResult && 'error' in renameResult}
-	<div class="alert">{renameResult.error}</div>
+{#if renameResult}
+	{#if renameResult.ok}
+		<div class="result ok">Renamed to <b>{renameResult.name}</b>.</div>
+	{:else}
+		<div class="alert">{renameResult.error}</div>
+	{/if}
 {/if}
 
 <div class="card">
 	<h2>New project</h2>
 	<form
-		method="POST"
-		action="?/create"
-		use:enhance={() => {
-			return async ({ update }) => {
-				await update({ reset: false });
-				newName = '';
-			};
-		}}
+		{...createProject.enhance(async ({ submit }) => {
+			await submit();
+			newName = '';
+		})}
 	>
 		<div class="row">
 			<label class="field grow">
@@ -69,57 +65,59 @@
 </div>
 
 <div class="card">
-	<h2>Your projects <span class="muted small">({data.projects.length})</span></h2>
-	{#if data.projects.length === 0}
-		<div class="muted small">No projects yet. Add one above.</div>
-	{:else}
-		<ul class="rows">
-			{#each data.projects as p (p.id)}
-				{@const isLastVisited = p.id === data.lastVisitedProjectId}
-				<li class:active={isLastVisited}>
-					<div class="row-head">
-						<div class="name-block">
-							<a class="name" href={resolve('/p/[projectId]', { projectId: p.id })}>{p.name}</a>
-							{#if isLastVisited}<span class="chip">last visited</span>{/if}
+	{#await projectsQuery}
+		<h2>Your projects</h2>
+		<div class="muted small">Loading…</div>
+	{:then data}
+		<h2>Your projects <span class="muted small">({data.projects.length})</span></h2>
+		{#if data.projects.length === 0}
+			<div class="muted small">No projects yet. Add one above.</div>
+		{:else}
+			<ul class="rows">
+				{#each data.projects as p (p.id)}
+					{@const isLastVisited = p.id === data.lastVisitedProjectId}
+					{@const renameForm = renameProject.for(p.id)}
+					<li class:active={isLastVisited}>
+						<div class="row-head">
+							<div class="name-block">
+								<a class="name" href={resolve('/p/[projectId]', { projectId: p.id })}>{p.name}</a>
+								{#if isLastVisited}<span class="chip">last visited</span>{/if}
+							</div>
+							<span class="muted small">
+								{p.workflowCount} workflow{p.workflowCount === 1 ? '' : 's'} · created {fmt(
+									p.createdAt
+								)}
+							</span>
 						</div>
-						<span class="muted small">
-							{p.workflowCount} workflow{p.workflowCount === 1 ? '' : 's'} · created {fmt(
-								p.createdAt
-							)}
-						</span>
-					</div>
-					<div class="row-actions">
-						<a class="btn small" href={resolve('/p/[projectId]', { projectId: p.id })}>
-							Open project →
-						</a>
-						<form
-							method="POST"
-							action="?/rename"
-							use:enhance={() => {
-								return async ({ update }) => {
-									await update({ reset: false });
+						<div class="row-actions">
+							<a class="btn small" href={resolve('/p/[projectId]', { projectId: p.id })}>
+								Open project →
+							</a>
+							<form
+								{...renameForm.enhance(async ({ submit }) => {
+									await submit();
 									renaming[p.id] = '';
-								};
-							}}
-						>
-							<input type="hidden" name="projectId" value={p.id} />
-							<input
-								name="name"
-								type="text"
-								placeholder="new name"
-								autocomplete="off"
-								spellcheck="false"
-								bind:value={renaming[p.id]}
-							/>
-							<button class="btn small" type="submit" disabled={!(renaming[p.id] ?? '').length}>
-								Rename
-							</button>
-						</form>
-					</div>
-				</li>
-			{/each}
-		</ul>
-	{/if}
+								})}
+							>
+								<input type="hidden" name="projectId" value={p.id} />
+								<input
+									name="name"
+									type="text"
+									placeholder="new name"
+									autocomplete="off"
+									spellcheck="false"
+									bind:value={renaming[p.id]}
+								/>
+								<button class="btn small" type="submit" disabled={!(renaming[p.id] ?? '').length}>
+									Rename
+								</button>
+							</form>
+						</div>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{/await}
 </div>
 
 <style>
