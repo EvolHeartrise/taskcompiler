@@ -51,3 +51,16 @@ name = "EMAIL"
 
 [triggers]
 crons = ["* * * * *"]
+
+# Workers Observability (https://developers.cloudflare.com/workers/observability/logs/workers-logs/).
+# `head_sampling_rate = 1` keeps 100% of invocations (no sampling); drop below 1
+# to sample if the log volume grows. `invocation_logs = true` keeps the
+# built-in per-invocation summary line alongside our structured events.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+head_sampling_rate = 1
