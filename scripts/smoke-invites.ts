@@ -27,7 +27,7 @@
 import { spawn } from 'node:child_process';
 
 const PROD_URL = 'https://taskcompiler.com';
-const DB = 'runely-dev';
+const DB = 'taskcompiler-dev';
 
 interface SqlResult {
 	results: unknown[];

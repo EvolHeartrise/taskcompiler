@@ -15,7 +15,7 @@ Runely is a Pabbly/Zapier/n8n alternative where you describe a workflow in plain
 
 ```sh
 bun install
-bunx wrangler d1 migrations apply runely-dev --local
+bunx wrangler d1 migrations apply taskcompiler-dev --local
 # .dev.vars (gitignored) — see "Environment" for the full list
 echo 'BETTER_AUTH_SECRET=dev
 CLOUDFLARE_API_TOKEN=...

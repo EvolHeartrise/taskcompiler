@@ -47,7 +47,7 @@ import {
 } from '../src/lib/server/auth/permissions.ts';
 
 const PROD_URL = 'https://taskcompiler.com';
-const DB = 'runely-dev';
+const DB = 'taskcompiler-dev';
 
 interface SqlResult {
 	results: unknown[];

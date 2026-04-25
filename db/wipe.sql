@@ -2,8 +2,8 @@
 -- touches — including Better Auth's and wrangler's old migration tracking —
 -- so `db/schema.sql` can be applied afterwards against a clean slate.
 --
---   bunx wrangler d1 execute runely-dev --remote --file db/wipe.sql
---   bunx wrangler d1 execute runely-dev --remote --file db/schema.sql
+--   bunx wrangler d1 execute taskcompiler-dev --remote --file db/wipe.sql
+--   bunx wrangler d1 execute taskcompiler-dev --remote --file db/schema.sql
 --
 -- Safe to run repeatedly (all drops are IF EXISTS). Will sign out every
 -- existing user (session table goes with it). Don't use against a database
