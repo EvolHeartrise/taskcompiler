@@ -2,7 +2,7 @@
 -- No migration tracking, no in-place alters: when the schema changes, wipe
 -- the database and re-apply this file. Apply with:
 --
---   bunx wrangler d1 execute runely-dev --remote --file db/schema.sql
+--   bunx wrangler d1 execute taskcompiler-dev --remote --file db/schema.sql
 --
 -- The user/session/account/verification tables match Better Auth's default
 -- SQLite shape; the rest are Runely's.

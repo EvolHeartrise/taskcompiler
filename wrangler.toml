@@ -1,8 +1,8 @@
 # D1 setup:
-#   Remote: `bunx wrangler d1 create runely-dev` then paste the returned
-#   `database_id` below. Apply schema with `bunx wrangler d1 migrations apply runely-dev --remote`.
+#   Remote: `bunx wrangler d1 create taskcompiler-dev` then paste the returned
+#   `database_id` below. Apply schema with `bunx wrangler d1 migrations apply taskcompiler-dev --remote`.
 #   Local:  wrangler auto-creates a local D1 under `.wrangler/state/` on first `wrangler dev`.
-#   Apply migrations locally with `bunx wrangler d1 migrations apply runely-dev --local`.
+#   Apply migrations locally with `bunx wrangler d1 migrations apply taskcompiler-dev --local`.
 
 name = "taskcompiler"
 main = "src/worker.ts"
@@ -25,8 +25,8 @@ binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "runely-dev"
-database_id = "2c63755f-ef22-4e89-97d0-2dd9c9fdb153"
+database_name = "taskcompiler-dev"
+database_id = "af8b678f-2108-4d3f-b7e2-092a971c94f7"
 
 [[dispatch_namespaces]]
 binding = "DISPATCHER"
