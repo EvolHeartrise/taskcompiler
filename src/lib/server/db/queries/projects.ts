@@ -135,6 +135,19 @@ export async function renameProject(
 	return result?.project ?? null;
 }
 
+// Drops the project row. FK cascades remove event_sources, workflows,
+// project_members, project_invites, project_secrets — and the workflow
+// children that have clean cascades (events via event_sources, runs via
+// workflows, workflow_versions/workflow_state via workflows). Workflow-
+// internal non-cascade FKs (current_version_id, parent_version_id,
+// healed_from_run_id, parent_run_id, triggering_run_id, new_version_id)
+// must be cleared first by calling `tearDownWorkflow` per-workflow before
+// invoking this — see the project-delete remote command for the wrapper.
+export async function deleteProject(db: D1Database, id: string): Promise<boolean> {
+	const res = await db.prepare(`DELETE FROM projects WHERE id = ?`).bind(id).run();
+	return (res.meta?.changes ?? 0) > 0;
+}
+
 export async function ensureDefaultProject(db: D1Database, userId: string): Promise<Project[]> {
 	const existing = await listProjectsForUser(db, userId);
 	if (existing.length > 0) {
