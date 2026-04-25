@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth';
+import { APIError } from 'better-auth/api';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink } from 'better-auth/plugins';
 import { sveltekitCookies } from 'better-auth/svelte-kit';
@@ -18,6 +19,7 @@ const DEFAULT_BASE_URL = 'https://taskcompiler.com';
 function buildAuth(env: Env) {
 	const db = drizzle(env.DB, { schema });
 	const baseURL = env.APP_URL ?? DEFAULT_BASE_URL;
+	const allowlist = parseBetaAllowlist(env.BETA_ALLOWLIST);
 
 	return betterAuth({
 		baseURL,
@@ -42,9 +44,34 @@ function buildAuth(env: Env) {
 						}
 					}
 				: undefined,
+		databaseHooks:
+			allowlist === null
+				? undefined
+				: {
+						user: {
+							create: {
+								before: async (user) => {
+									if (await isBetaAllowed(env, allowlist, user.email)) {
+										return;
+									}
+									log.info(EVENTS.AUTH_SIGNUP_BLOCKED, { email: user.email, via: 'create' });
+									throw new APIError('FORBIDDEN', {
+										message: 'Sign-ups are currently invite-only.'
+									});
+								}
+							}
+						}
+					},
 		plugins: [
 			magicLink({
 				sendMagicLink: async ({ email, url }) => {
+					if (allowlist !== null && !(await isBetaAllowed(env, allowlist, email))) {
+						// Silent no-op: returning success without sending avoids turning
+						// the form into an enumeration oracle. databaseHooks above is the
+						// real security boundary if anyone forges a token from elsewhere.
+						log.info(EVENTS.AUTH_SIGNUP_BLOCKED, { email, via: 'magic_link' });
+						return;
+					}
 					await sendMagicLinkEmail(env, email, url);
 				}
 			}),
@@ -53,17 +80,45 @@ function buildAuth(env: Env) {
 	});
 }
 
-async function sendMagicLinkEmail(env: Env, email: string, url: string) {
-	// No verified sender domain yet — log the link so auth works end-to-end
-	// via `wrangler tail`. Set EMAIL_FROM (e.g. "TaskCompiler <auth@yourdomain.com>")
-	// once the domain is on Cloudflare DNS and Email Service is enabled.
-	// An unset EMAIL_FROM *is* the dev signal here — in prod it will always
-	// be set — so we surface the URL-with-token to the unstructured stream
-	// only on that branch and never into the structured logger.
-	if (!env.EMAIL_FROM) {
-		console.log(`[auth] magic link for ${email}: ${url}`);
-		return;
+// Private-beta gate. Lifecycle:
+//   • BETA_ALLOWLIST unset → returns null, gate is off, anyone can sign up.
+//   • BETA_ALLOWLIST set (any value, even empty) → returns a Set of normalized
+//     emails. Only those + anyone with a pending project_invites row may
+//     sign up.
+// To open public sign-ups, `wrangler secret delete BETA_ALLOWLIST` and redeploy
+// — no code change needed. To remove the gate entirely, drop this helper, the
+// `databaseHooks` block, and the `if (allowlist !== null && ...)` branch in
+// `sendMagicLink` above.
+function parseBetaAllowlist(raw: string | undefined): Set<string> | null {
+	if (raw === undefined) {
+		return null;
 	}
+	return new Set(
+		raw
+			.split(',')
+			.map((e) => e.trim().toLowerCase())
+			.filter(Boolean)
+	);
+}
+
+async function isBetaAllowed(env: Env, allowlist: Set<string>, email: string): Promise<boolean> {
+	const normalized = email.trim().toLowerCase();
+	if (allowlist.has(normalized)) {
+		return true;
+	}
+	// Auto-allow anyone with a live project invite — invites become a second
+	// admission path so existing testers can grow the beta without a redeploy.
+	const row = await env.DB.prepare(
+		`SELECT 1 AS x FROM project_invites
+		 WHERE LOWER(email) = ? AND status = 'pending' AND expires_at > ?
+		 LIMIT 1`
+	)
+		.bind(normalized, Date.now())
+		.first<{ x: number }>();
+	return row !== null;
+}
+
+async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 	try {
 		await env.EMAIL.send({
 			from: env.EMAIL_FROM,

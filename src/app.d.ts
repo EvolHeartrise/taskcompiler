@@ -44,7 +44,10 @@ declare global {
 			APP_URL?: string;
 			GOOGLE_CLIENT_ID?: string;
 			GOOGLE_CLIENT_SECRET?: string;
-			EMAIL_FROM?: string;
+			EMAIL_FROM: string;
+			// Private-beta gate. Presence (even empty) closes sign-up to the listed
+			// emails + anyone with a pending project_invites row. Unset = open.
+			BETA_ALLOWLIST?: string;
 		}
 	}
 }

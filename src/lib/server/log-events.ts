@@ -79,12 +79,12 @@ export const EVENTS = {
 	WEBHOOK_INGESTED: 'webhook.ingested',
 	AUTH_MAGIC_LINK_SENT: 'auth.magic_link.sent',
 	AUTH_EMAIL_SEND_FAILED: 'auth.email.send_failed',
+	AUTH_SIGNUP_BLOCKED: 'auth.signup.blocked',
 	TEARDOWN_WFP_DELETE_FAILED: 'teardown.wfp_delete_failed',
 	TEST_RUNNER_CLEANUP_FAILED: 'test_runner.cleanup_failed',
 
 	// Project invite + membership lifecycle. INVITE_SENT carries the accept_url
-	// field so the dev-mode console fallback (when EMAIL_FROM is unset) is
-	// retrievable via `bun scripts/logs.ts --event invite.sent` for smoke tests.
+	// so smoke tests can pull it via `bun scripts/logs.ts --event invite.sent`.
 	INVITE_CREATED: 'invite.created',
 	INVITE_SENT: 'invite.sent',
 	INVITE_SEND_FAILED: 'invite.send_failed',

@@ -42,6 +42,11 @@
 		<h1>Sign in to TaskCompiler</h1>
 		<p class="muted">Use Google or a magic link sent to your email.</p>
 
+		<div class="notice">
+			<b>Private beta.</b> Sign-up is invite-only right now. If your email isn't on the beta list (or
+			you don't have an active project invite), you won't receive a magic link.
+		</div>
+
 		{#if error}
 			<div class="alert">{error}</div>
 		{/if}
@@ -135,6 +140,16 @@
 		padding: 10px 12px;
 		margin-bottom: 14px;
 		font-size: 13px;
+	}
+	.notice {
+		background: #fffbeb;
+		border: 1px solid #fde68a;
+		color: #78350f;
+		border-radius: 6px;
+		padding: 10px 12px;
+		margin-bottom: 14px;
+		font-size: 13px;
+		line-height: 1.45;
 	}
 	.sent {
 		background: #f0fdf4;
