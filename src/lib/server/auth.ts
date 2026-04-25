@@ -13,7 +13,7 @@ const log = createLogger('auth');
 
 type Auth = ReturnType<typeof buildAuth>;
 
-const DEFAULT_BASE_URL = 'https://runely.evolheartrise.workers.dev';
+const DEFAULT_BASE_URL = 'https://taskcompiler.com';
 
 function buildAuth(env: Env) {
 	const db = drizzle(env.DB, { schema });

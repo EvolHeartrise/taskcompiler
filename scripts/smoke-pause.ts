@@ -64,7 +64,7 @@
 
 import { spawn } from 'node:child_process';
 
-const PROD_URL = 'https://runely.evolheartrise.workers.dev';
+const PROD_URL = 'https://taskcompiler.com';
 const DB = 'runely-dev';
 
 interface SqlResult {
