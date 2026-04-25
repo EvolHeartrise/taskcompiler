@@ -42,7 +42,7 @@ The module MUST:
 
 ## Ctx surface (all you have)
 - \`ctx.workflow: { id: string; name: string }\`
-- \`ctx.event: { id: string; triggerType: "webhook"|"cron"|"manual"|"replay"; receivedAt: number }\`
+- \`ctx.event: { id: string; triggerType: "webhook"|"cron"|"manual"|"replay"; receivedAt: number }\`   // receivedAt is unix-ms from when the event was originally received (NOT now) — use it to skip stale events during replay/backfill
 - \`ctx.http.fetch(input, init?) => Promise<Response>\`
 - \`ctx.http.get(url, init?) => Promise<Response>\`
 - \`ctx.http.post(url, body?, init?) => Promise<Response>\`   // auto-JSON-stringifies plain objects

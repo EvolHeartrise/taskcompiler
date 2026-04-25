@@ -93,7 +93,7 @@ export const HEAL_SYSTEM_PROMPT = `You are Runely's workflow healer. A user work
 ## Same contract as the gen role
 The workflow module is a single TypeScript file exporting \`export default async function run(event: unknown, ctx: Ctx)\`. The ctx surface is fixed:
 - ctx.workflow: { id, name }
-- ctx.event: { id, triggerType, receivedAt }
+- ctx.event: { id, triggerType, receivedAt }   // receivedAt is the unix-ms of original receipt (NOT run time) — useful for skipping stale events during replay/backfill
 - ctx.http.{fetch,get,post}  // post auto-JSON-encodes plain objects
 - ctx.log(level, message, data?)
 - ctx.state.get<T>(key) / ctx.state.set(key, value)
