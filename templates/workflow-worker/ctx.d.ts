@@ -1,5 +1,5 @@
 // Kept in sync with the runtime ctx surface in ctx.ts. The typecheck service
-// rewrites the `__RUNELY_SECRET_NAMES__` marker below with a per-project
+// rewrites the `__TASKCOMPILER_SECRET_NAMES__` marker below with a per-project
 // string-literal union (or `never`) so `ctx.secret("TYPO")` becomes a TS
 // error — DO NOT remove the marker.
 
@@ -20,5 +20,5 @@ interface Ctx {
 		get<T = unknown>(key: string): Promise<T | undefined>;
 		set(key: string, value: unknown): Promise<void>;
 	};
-	secret: (name: /* __RUNELY_SECRET_NAMES__ */ never) => string;
+	secret: (name: /* __TASKCOMPILER_SECRET_NAMES__ */ never) => string;
 }

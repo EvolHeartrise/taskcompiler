@@ -55,7 +55,7 @@ function buildAuth(env: Env) {
 
 async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 	// No verified sender domain yet — log the link so auth works end-to-end
-	// via `wrangler tail`. Set EMAIL_FROM (e.g. "Runely <auth@yourdomain.com>")
+	// via `wrangler tail`. Set EMAIL_FROM (e.g. "TaskCompiler <auth@yourdomain.com>")
 	// once the domain is on Cloudflare DNS and Email Service is enabled.
 	// An unset EMAIL_FROM *is* the dev signal here — in prod it will always
 	// be set — so we surface the URL-with-token to the unstructured stream
@@ -68,9 +68,9 @@ async function sendMagicLinkEmail(env: Env, email: string, url: string) {
 		await env.EMAIL.send({
 			from: env.EMAIL_FROM,
 			to: email,
-			subject: 'Sign in to Runely',
-			html: `<p>Click the link below to sign in to Runely. It expires in 5 minutes.</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, ignore this email.</p>`,
-			text: `Sign in to Runely: ${url}\n\nThis link expires in 5 minutes. If you didn't request it, ignore this email.`
+			subject: 'Sign in to TaskCompiler',
+			html: `<p>Click the link below to sign in to TaskCompiler. It expires in 5 minutes.</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, ignore this email.</p>`,
+			text: `Sign in to TaskCompiler: ${url}\n\nThis link expires in 5 minutes. If you didn't request it, ignore this email.`
 		});
 		log.info(EVENTS.AUTH_MAGIC_LINK_SENT);
 	} catch (err) {

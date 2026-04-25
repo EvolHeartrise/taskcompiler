@@ -216,7 +216,7 @@ function simulateChangeMemberRole(args: {
 }
 
 async function main(): Promise<void> {
-	process.stdout.write(`\n== runely permissions smoke (${RUN_TAG}) ==\n\n`);
+	process.stdout.write(`\n== taskcompiler permissions smoke (${RUN_TAG}) ==\n\n`);
 
 	const before = await snapshotCounts();
 	process.stdout.write(
@@ -286,7 +286,7 @@ async function main(): Promise<void> {
 		// could mask intent. We seed a real user + project just to be sure
 		// the CHECK is what fires.
 		await sql(
-			`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${OWNER_ID}', 'Smoke Owner', 'smoke-owner+${RUN_TAG}@runely.test', 1, ${nowMs}, ${nowMs})`
+			`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${OWNER_ID}', 'Smoke Owner', 'smoke-owner+${RUN_TAG}@taskcompiler.test', 1, ${nowMs}, ${nowMs})`
 		);
 		await sql(
 			`INSERT INTO projects (id, user_id, name, created_at, updated_at) VALUES ('${PROJECT_ID}', '${OWNER_ID}', 'Smoke Perm Project ${RUN_TAG}', ${nowMs}, ${nowMs})`
@@ -331,10 +331,10 @@ async function main(): Promise<void> {
 
 		await sql(
 			[
-				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${ADMIN_ID}', 'Smoke Admin', 'smoke-admin+${RUN_TAG}@runely.test', 1, ${nowMs}, ${nowMs})`,
-				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${EDITOR_ID}', 'Smoke Editor', 'smoke-editor+${RUN_TAG}@runely.test', 1, ${nowMs}, ${nowMs})`,
-				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${OUTSIDER_ID}', 'Smoke Outsider', 'smoke-outsider+${RUN_TAG}@runely.test', 1, ${nowMs}, ${nowMs})`,
-				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${INVITEE_ID}', 'Smoke Invitee', 'smoke-invitee+${RUN_TAG}@runely.test', 1, ${nowMs}, ${nowMs})`,
+				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${ADMIN_ID}', 'Smoke Admin', 'smoke-admin+${RUN_TAG}@taskcompiler.test', 1, ${nowMs}, ${nowMs})`,
+				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${EDITOR_ID}', 'Smoke Editor', 'smoke-editor+${RUN_TAG}@taskcompiler.test', 1, ${nowMs}, ${nowMs})`,
+				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${OUTSIDER_ID}', 'Smoke Outsider', 'smoke-outsider+${RUN_TAG}@taskcompiler.test', 1, ${nowMs}, ${nowMs})`,
+				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${INVITEE_ID}', 'Smoke Invitee', 'smoke-invitee+${RUN_TAG}@taskcompiler.test', 1, ${nowMs}, ${nowMs})`,
 				`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES ('${PROJECT_ID}', '${OWNER_ID}', 'owner', ${nowMs})`,
 				`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES ('${PROJECT_ID}', '${ADMIN_ID}', 'admin', ${nowMs})`,
 				`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES ('${PROJECT_ID}', '${EDITOR_ID}', 'editor', ${nowMs})`
@@ -546,7 +546,7 @@ async function main(): Promise<void> {
 		// Create an invite with role='admin'.
 		const expiresAt = nowMs + 7 * 86400 * 1000;
 		await sql(
-			`INSERT INTO project_invites (id, project_id, email, token, invited_by, status, role, expires_at, created_at) VALUES ('${INVITE_ID}', '${PROJECT_ID}', 'smoke-invitee+${RUN_TAG}@runely.test', '${INVITE_TOKEN}', '${OWNER_ID}', 'pending', 'admin', ${expiresAt}, ${nowMs})`
+			`INSERT INTO project_invites (id, project_id, email, token, invited_by, status, role, expires_at, created_at) VALUES ('${INVITE_ID}', '${PROJECT_ID}', 'smoke-invitee+${RUN_TAG}@taskcompiler.test', '${INVITE_TOKEN}', '${OWNER_ID}', 'pending', 'admin', ${expiresAt}, ${nowMs})`
 		);
 
 		// Replay the acceptInvite() batch from invites.ts:148-167

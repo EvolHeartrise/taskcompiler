@@ -35,11 +35,11 @@
 	}
 </script>
 
-<svelte:head><title>Sign in · Runely</title></svelte:head>
+<svelte:head><title>Sign in · TaskCompiler</title></svelte:head>
 
 <div class="wrap">
 	<div class="card">
-		<h1>Sign in to Runely</h1>
+		<h1>Sign in to TaskCompiler</h1>
 		<p class="muted">Use Google or a magic link sent to your email.</p>
 
 		{#if error}

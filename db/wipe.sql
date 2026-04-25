@@ -1,4 +1,4 @@
--- Drops every table Runely touches — including Better Auth's and wrangler's
+-- Drops every table TaskCompiler touches — including Better Auth's and wrangler's
 -- old migration tracking — so `db/schema.sql` can be applied against a clean
 -- slate. Safe to run repeatedly (all drops are IF EXISTS). Signs out every
 -- existing user. Don't use against a database that has real data.

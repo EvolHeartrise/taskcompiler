@@ -32,7 +32,7 @@ interface EmittedPayload {
 	summary: string;
 }
 
-const GEN_SYSTEM_PROMPT = `You are Runely's workflow generator. You turn a user's natural-language description into a single TypeScript module that implements their workflow.
+const GEN_SYSTEM_PROMPT = `You are TaskCompiler's workflow generator. You turn a user's natural-language description into a single TypeScript module that implements their workflow.
 
 ## Contract
 The module MUST:

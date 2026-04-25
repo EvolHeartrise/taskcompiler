@@ -58,7 +58,7 @@
 	const renameResult = $derived(renameProject.result);
 </script>
 
-<svelte:head><title>Projects · Runely</title></svelte:head>
+<svelte:head><title>Projects · TaskCompiler</title></svelte:head>
 
 <div class="page-head">
 	<div>

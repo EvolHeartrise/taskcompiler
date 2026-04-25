@@ -18,7 +18,7 @@ describe('redact', () => {
 			BETTER_AUTH_SECRET: 'yyy',
 			password: 'hunter2',
 			authorization: 'Bearer abc',
-			magic_link: 'https://runely/auth?token=zzz'
+			magic_link: 'https://taskcompiler/auth?token=zzz'
 		});
 		expect(out).toEqual({
 			api_key: '<redacted>',

@@ -3,7 +3,7 @@
 // on-disk casing before spawning child processes. On Windows, bash (Git Bash /
 // MSYS) lower-cases the drive letter and any path component the user typed,
 // so `process.cwd()` may not match the canonical filesystem casing
-// (e.g. `D:\git\runely` vs the on-disk `D:\Git\runely`). When TypeScript /
+// (e.g. `D:\git\taskcompiler` vs the on-disk `D:\Git\taskcompiler`). When TypeScript /
 // tsgo resolves `node_modules/...` imports, some code paths take the
 // canonical casing from the OS while others reuse the cwd-derived path,
 // triggering bogus `forceConsistentCasingInFileNames` errors on a cold cache.

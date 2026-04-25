@@ -10,7 +10,7 @@ const LIB_DIR = '/lib/';
 const CTX_FILENAME = '/ctx.d.ts';
 const WORKFLOW_FILENAME = '/workflow.ts';
 const MAIN_FILENAME = '/main.ts';
-const SECRET_PLACEHOLDER = '/* __RUNELY_SECRET_NAMES__ */ never';
+const SECRET_PLACEHOLDER = '/* __TASKCOMPILER_SECRET_NAMES__ */ never';
 const MAX_REPORTED_DIAGNOSTICS = 20;
 
 // Forces the workflow's default export through the Ctx-typed signature

@@ -45,12 +45,12 @@ export async function sendInviteEmail(params: SendInviteParams): Promise<void> {
 		return;
 	}
 	try {
-		const subject = `${inviter} invited you to ${projectName} on Runely`;
-		const html = `<p>${escapeHtml(inviter)} invited you to collaborate on <b>${escapeHtml(projectName)}</b> on Runely.</p>
+		const subject = `${inviter} invited you to ${projectName} on TaskCompiler`;
+		const html = `<p>${escapeHtml(inviter)} invited you to collaborate on <b>${escapeHtml(projectName)}</b> on TaskCompiler.</p>
 <p>Accept the invite using the link below. It expires in 7 days.</p>
 <p><a href="${acceptUrl}">${acceptUrl}</a></p>
 <p>If you didn't expect this email, you can safely ignore it.</p>`;
-		const text = `${inviter} invited you to ${projectName} on Runely.\n\nAccept: ${acceptUrl}\n\nThis link expires in 7 days. If you didn't expect this email, ignore it.`;
+		const text = `${inviter} invited you to ${projectName} on TaskCompiler.\n\nAccept: ${acceptUrl}\n\nThis link expires in 7 days. If you didn't expect this email, ignore it.`;
 		await env.EMAIL.send({
 			from: env.EMAIL_FROM,
 			html,

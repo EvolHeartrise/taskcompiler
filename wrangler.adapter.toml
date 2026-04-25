@@ -5,7 +5,7 @@
 # `wrangler.toml`, which points `main` at `src/worker.ts` — our wrapper that
 # adds the Workflow class exports alongside SvelteKit's fetch handler.
 
-name = "runely"
+name = "taskcompiler"
 main = ".svelte-kit/cloudflare/_worker.js"
 compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]

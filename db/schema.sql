@@ -54,7 +54,7 @@ CREATE TABLE verification (
 );
 CREATE INDEX idx_verification_identifier ON verification(identifier);
 
--- Runely --------------------------------------------------------------------
+-- TaskCompiler --------------------------------------------------------------------
 
 -- `user_id` is the creator's id and stays as attribution. Access checks go
 -- through `project_members` (flat power model — every member is equal-power;

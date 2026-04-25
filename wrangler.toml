@@ -24,15 +24,15 @@ database_id = "af8b678f-2108-4d3f-b7e2-092a971c94f7"
 
 [[dispatch_namespaces]]
 binding = "DISPATCHER"
-namespace = "runely-workflows"
+namespace = "taskcompiler-workflows"
 
 [[workflows]]
-name = "runely-generate"
+name = "taskcompiler-generate"
 binding = "GEN_WORKFLOW"
 class_name = "GenerateWorkflowFlow"
 
 [[workflows]]
-name = "runely-heal"
+name = "taskcompiler-heal"
 binding = "HEAL_WORKFLOW"
 class_name = "HealWorkflowFlow"
 
