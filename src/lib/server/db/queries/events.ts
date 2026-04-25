@@ -122,6 +122,49 @@ export async function listAllEventsForWorkflow(
 	return res.results.map(rowToEvent);
 }
 
+// Events for a workflow that have no corresponding `runs` row — i.e. the
+// workflow was paused (or had no current version) when the event landed, so
+// the executor persisted the event but skipped the run insert. The opt-in
+// backfill loop (task 14) consumes this list in received_at ASC order.
+// `limit` bounds the per-iteration page size so an arbitrarily large
+// deferred queue doesn't blow the Worker's memory budget; the backfill
+// loop re-queries between batches to pick up late arrivals.
+export async function listUnrunEventsForWorkflow(
+	db: D1Database,
+	workflowId: string,
+	limit = 100
+): Promise<Event[]> {
+	const res = await db
+		.prepare(
+			`SELECT e.* FROM events e
+			 JOIN workflows w ON w.event_source_id = e.event_source_id
+			 LEFT JOIN runs r ON r.event_id = e.id AND r.workflow_id = w.id
+			 WHERE w.id = ?
+			   AND r.id IS NULL
+			 ORDER BY e.received_at ASC
+			 LIMIT ?`
+		)
+		.bind(workflowId, limit)
+		.all<EventRow>();
+	return res.results.map(rowToEvent);
+}
+
+export async function countUnrunEventsForWorkflow(
+	db: D1Database,
+	workflowId: string
+): Promise<number> {
+	const row = await db
+		.prepare(
+			`SELECT COUNT(*) AS count FROM events e
+			 JOIN workflows w ON w.event_source_id = e.event_source_id
+			 LEFT JOIN runs r ON r.event_id = e.id AND r.workflow_id = w.id
+			 WHERE w.id = ? AND r.id IS NULL`
+		)
+		.bind(workflowId)
+		.first<{ count: number }>();
+	return row?.count ?? 0;
+}
+
 export async function countEventsForSource(db: D1Database, sourceId: string): Promise<number> {
 	const row = await db
 		.prepare(`SELECT COUNT(*) AS count FROM events WHERE event_source_id = ?`)

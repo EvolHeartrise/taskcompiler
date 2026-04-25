@@ -3,7 +3,12 @@ import type { Workflow } from '@cloudflare/workers-types';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
-import { executeManualEvent, replayFailedEvents, WorkflowPausedError } from '$lib/server/engine';
+import {
+	executeManualEvent,
+	replayFailedEvents,
+	startBackfill,
+	WorkflowPausedError
+} from '$lib/server/engine';
 import {
 	getOpenNeedsAttentionSession,
 	listHealSessionsForWorkflow,
@@ -317,7 +322,12 @@ export const pauseWorkflow = command(
 );
 
 type ResumeWorkflowResult =
-	| { ok: true; alreadyActive: boolean; backfillRequested: boolean }
+	| {
+			ok: true;
+			alreadyActive: boolean;
+			backfillRequested: boolean;
+			backfillStartedEventCount?: number;
+	  }
 	| { ok: false; error: string };
 
 export const resumeWorkflow = command(
@@ -333,6 +343,7 @@ export const resumeWorkflow = command(
 	}): Promise<ResumeWorkflowResult> => {
 		const event = getRequestEvent();
 		const env = event.platform!.env;
+		const ctx = event.platform!.ctx;
 		const user = event.locals.user;
 		if (!user) {
 			error(401, 'unauthorized');
@@ -355,13 +366,40 @@ export const resumeWorkflow = command(
 			resumed_by: user.id,
 			backfill_requested: backfillRequested
 		});
+		let backfillStartedEventCount: number | undefined;
 		if (backfillRequested) {
-			// TASK-14: wire startBackfill(env, workflowId) here. The backfill
-			// loop should enumerate events via the "events without a run"
-			// query documented in task 13's report, then invoke
-			// executeExistingEventForWorkflow for each.
+			// Kick off the backfill loop detached — the response returns as
+			// soon as we know the event count, and the loop runs to
+			// completion (or pause) via ctx.waitUntil. The loop re-checks
+			// pause state between events, so a follow-up pauseWorkflow
+			// command halts the backfill cleanly.
+			const handle = await startBackfill(env, workflowId);
+			backfillStartedEventCount = handle.expectedEventCount;
+			if (handle.started) {
+				ctx.waitUntil(
+					handle.whenDone.catch((err) => {
+						// startBackfill's whenDone rethrows uncaught loop
+						// errors; swallow here so ctx.waitUntil doesn't
+						// reject. The error is already logged inside the
+						// loop as WORKFLOW_BACKFILL_STOPPED (reason: error).
+						log.error(EVENTS.WORKFLOW_BACKFILL_STOPPED, {
+							workflow_id: workflowId,
+							reason: 'error',
+							error: errorMessage(err)
+						});
+					})
+				);
+			}
 		}
 		await getInFlight({ projectId, workflowId }).refresh();
-		return { ok: true, alreadyActive: !changed, backfillRequested };
+		const result: ResumeWorkflowResult = {
+			alreadyActive: !changed,
+			backfillRequested,
+			ok: true
+		};
+		if (backfillRequested && backfillStartedEventCount !== undefined) {
+			result.backfillStartedEventCount = backfillStartedEventCount;
+		}
+		return result;
 	}
 );
