@@ -1,8 +1,10 @@
 # D1 setup:
 #   Remote: `bunx wrangler d1 create taskcompiler-dev` then paste the returned
-#   `database_id` below. Apply schema with `bunx wrangler d1 migrations apply taskcompiler-dev --remote`.
+#   `database_id` below. Apply schema with
+#   `bunx wrangler d1 execute taskcompiler-dev --remote --file db/schema.sql`.
 #   Local:  wrangler auto-creates a local D1 under `.wrangler/state/` on first `wrangler dev`.
-#   Apply migrations locally with `bunx wrangler d1 migrations apply taskcompiler-dev --local`.
+#   Apply schema locally with
+#   `bunx wrangler d1 execute taskcompiler-dev --local --file db/schema.sql`.
 
 name = "taskcompiler"
 main = "src/worker.ts"
