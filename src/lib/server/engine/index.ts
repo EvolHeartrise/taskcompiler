@@ -13,3 +13,5 @@ export type {
 } from './executor';
 export { backfillWorkflow, replayFailedEvents } from './replay';
 export type { DispatchTally } from './replay';
+export { runBackfillLoop, startBackfill } from './backfill';
+export type { BackfillResult, BackfillStopReason, StartBackfillResult } from './backfill';

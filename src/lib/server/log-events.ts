@@ -62,6 +62,15 @@ export const EVENTS = {
 	WORKFLOW_EVENT_DEFERRED: 'workflow.event_deferred',
 	WORKFLOW_HEAL_SKIPPED_PAUSED: 'workflow.heal_skipped_paused',
 
+	// Opt-in backfill loop (task 14) — fired when the user resumes a paused
+	// workflow with `backfill: true`. The loop enumerates "events with no
+	// run" in received_at ASC order and dispatches them sequentially through
+	// the normal executor path, re-checking pause state between each event.
+	WORKFLOW_BACKFILL_STARTED: 'workflow.backfill_started',
+	WORKFLOW_BACKFILL_PROGRESS: 'workflow.backfill_progress',
+	WORKFLOW_BACKFILL_COMPLETED: 'workflow.backfill_completed',
+	WORKFLOW_BACKFILL_STOPPED: 'workflow.backfill_stopped',
+
 	// Cron dispatcher.
 	CRON_TICK_END: 'cron.tick.end',
 	CRON_TICK_FAILED: 'cron.tick.failed',
