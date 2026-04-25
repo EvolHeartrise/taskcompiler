@@ -76,7 +76,8 @@ export const EVENTS = {
 	PROJECT_MEMBER_REMOVED: 'project.member_removed',
 	PROJECT_MEMBER_LEFT: 'project.member_left',
 	PROJECT_ROLE_CHANGED: 'project.role_changed',
-	PROJECT_OWNERSHIP_TRANSFERRED: 'project.ownership_transferred'
+	PROJECT_OWNERSHIP_TRANSFERRED: 'project.ownership_transferred',
+	PROJECT_DELETED: 'project.deleted'
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];

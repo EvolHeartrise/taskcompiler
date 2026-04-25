@@ -1,13 +1,56 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { can } from '$lib/permissions';
-	import { createProject, getProjects, renameProject } from './data.remote';
+	import { createProject, deleteProject, getProjects, renameProject } from './data.remote';
 
 	let newName = $state('');
 	let renaming = $state<Record<string, string>>({});
 
+	let deleteTarget = $state<{ id: string; name: string } | null>(null);
+	let deleteConfirmName = $state('');
+	let deletePending = $state(false);
+	let deleteError = $state<string | null>(null);
+	let deleteDialog: HTMLDialogElement | undefined = $state();
+
 	function fmt(ts: number): string {
 		return new Date(ts).toLocaleString();
+	}
+
+	function openDeleteDialog(id: string, name: string) {
+		deleteTarget = { id, name };
+		deleteConfirmName = '';
+		deleteError = null;
+		deleteDialog?.showModal();
+	}
+
+	function closeDeleteDialog() {
+		deleteDialog?.close();
+		deleteTarget = null;
+		deleteConfirmName = '';
+		deleteError = null;
+	}
+
+	async function submitDelete(e: SubmitEvent) {
+		e.preventDefault();
+		if (!deleteTarget) return;
+		if (deleteConfirmName !== deleteTarget.name) return;
+		deletePending = true;
+		deleteError = null;
+		try {
+			const result = await deleteProject({
+				confirmName: deleteConfirmName,
+				projectId: deleteTarget.id
+			});
+			if (result.ok) {
+				closeDeleteDialog();
+			} else {
+				deleteError = result.error;
+			}
+		} catch (err) {
+			deleteError = err instanceof Error ? err.message : String(err);
+		} finally {
+			deletePending = false;
+		}
 	}
 
 	const projectsQuery = $derived(getProjects());
@@ -79,6 +122,7 @@
 					{@const isLastVisited = p.id === data.lastVisitedProjectId}
 					{@const renameForm = renameProject.for(p.id)}
 					{@const canRename = can(p.role, 'project.rename')}
+					{@const canDelete = can(p.role, 'project.delete')}
 					<li class:active={isLastVisited}>
 						<div class="row-head">
 							<div class="name-block">
@@ -117,6 +161,15 @@
 									</button>
 								</form>
 							{/if}
+							{#if canDelete}
+								<button
+									type="button"
+									class="btn small danger"
+									onclick={() => openDeleteDialog(p.id, p.name)}
+								>
+									Delete
+								</button>
+							{/if}
 						</div>
 					</li>
 				{/each}
@@ -124,6 +177,44 @@
 		{/if}
 	{/await}
 </div>
+
+<dialog bind:this={deleteDialog} class="delete-dialog" onclose={closeDeleteDialog}>
+	{#if deleteTarget}
+		<form onsubmit={submitDelete}>
+			<h2>Delete project</h2>
+			<p>
+				Permanently delete <b>{deleteTarget.name}</b> and everything inside it — workflows, deployed worker
+				scripts, event sources, events, runs, heal sessions, members, pending invites, and project secrets.
+				This cannot be undone.
+			</p>
+			<label class="field">
+				<span>Type <code>{deleteTarget.name}</code> to confirm</span>
+				<input
+					type="text"
+					bind:value={deleteConfirmName}
+					autocomplete="off"
+					spellcheck="false"
+					disabled={deletePending}
+				/>
+			</label>
+			{#if deleteError}
+				<div class="alert">{deleteError}</div>
+			{/if}
+			<div class="dialog-actions">
+				<button type="button" class="btn" onclick={closeDeleteDialog} disabled={deletePending}>
+					Cancel
+				</button>
+				<button
+					type="submit"
+					class="btn danger"
+					disabled={deletePending || deleteConfirmName !== deleteTarget.name}
+				>
+					{deletePending ? 'Deleting…' : 'Delete project'}
+				</button>
+			</div>
+		</form>
+	{/if}
+</dialog>
 
 <style>
 	.page-head {
@@ -202,6 +293,87 @@
 	.btn.small {
 		padding: 6px 10px;
 		font-size: 12px;
+	}
+	.btn.danger {
+		background: #fff;
+		border-color: #fca5a5;
+		color: #991b1b;
+	}
+	.btn.danger:hover:not(:disabled) {
+		background: #fef2f2;
+	}
+	.btn.danger:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	.delete-dialog {
+		border: none;
+		border-radius: 10px;
+		padding: 0;
+		max-width: 480px;
+		width: calc(100% - 32px);
+		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+	}
+	.delete-dialog::backdrop {
+		background: rgba(15, 23, 42, 0.5);
+	}
+	.delete-dialog form {
+		padding: 22px 24px;
+	}
+	.delete-dialog h2 {
+		margin: 0 0 8px;
+		font-size: 18px;
+		color: #111;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.delete-dialog p {
+		margin: 0 0 16px;
+		color: #374151;
+		font-size: 13.5px;
+	}
+	.delete-dialog .field {
+		margin-bottom: 12px;
+	}
+	.delete-dialog .field > span {
+		display: block;
+		font-size: 13px;
+		margin-bottom: 6px;
+		color: #374151;
+	}
+	.delete-dialog .field > span code {
+		display: inline-block;
+		padding: 1px 6px;
+		background: #fef2f2;
+		border: 1px solid #fecaca;
+		border-radius: 4px;
+		color: #991b1b;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 12.5px;
+		font-weight: 600;
+	}
+	.delete-dialog input[type='text'] {
+		width: 100%;
+		padding: 9px 11px;
+		border: 1px solid #d1d5db;
+		border-radius: 6px;
+		font: inherit;
+		font-family: ui-monospace, monospace;
+	}
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 6px;
+	}
+	.dialog-actions .btn.danger:not(:disabled) {
+		background: #dc2626;
+		border-color: #dc2626;
+		color: #fff;
+	}
+	.dialog-actions .btn.danger:not(:disabled):hover {
+		background: #991b1b;
+		border-color: #991b1b;
 	}
 	.alert {
 		background: #fef2f2;
