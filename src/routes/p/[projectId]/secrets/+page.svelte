@@ -1,9 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { can, type ProjectRole } from '$lib/permissions';
 	import { deleteSecret, getSecrets, upsertSecret } from './data.remote';
 
 	let projectId = $derived(page.params.projectId!);
 	let secretsQuery = $derived(getSecrets(projectId));
+
+	let currentRole = $derived<ProjectRole>((page.data as { role?: ProjectRole }).role ?? 'editor');
+	let canManage = $derived(can(currentRole, 'secret.manage'));
 
 	let newName = $state('');
 	let newValue = $state('');
@@ -30,6 +34,10 @@
 	</div>
 </div>
 
+{#if !canManage}
+	<div class="notice">Read-only — secrets are managed by Admins and the Owner.</div>
+{/if}
+
 {#if upsertResult}
 	{#if upsertResult.ok}
 		<div class="result ok">Saved <b>{upsertResult.name}</b>.</div>
@@ -46,48 +54,50 @@
 	{/if}
 {/if}
 
-<div class="card">
-	<h2>Add or update a secret</h2>
-	<form
-		{...upsertSecret.enhance(async ({ submit }) => {
-			await submit();
-			newValue = '';
-		})}
-	>
-		<input type="hidden" name="projectId" value={projectId} />
-		<div class="row">
-			<label class="field grow">
-				<span>Name</span>
-				<input
-					name="name"
-					type="text"
-					value={newName}
-					oninput={(e) => (newName = e.currentTarget.value.toUpperCase())}
-					placeholder="SECRET_NAME"
-					autocomplete="off"
-					autocapitalize="characters"
-					spellcheck="false"
-					required
-				/>
-				<span class="hint">A–Z, 0–9, underscores.</span>
-			</label>
-			<label class="field grow">
-				<span>Value</span>
-				<input
-					name="value"
-					type="password"
-					bind:value={newValue}
-					placeholder="paste the secret value"
-					autocomplete="new-password"
-					spellcheck="false"
-					required
-				/>
-				<span class="hint">Saved opaque. Not displayed again after this submit.</span>
-			</label>
-			<button class="btn primary" type="submit">Save</button>
-		</div>
-	</form>
-</div>
+{#if canManage}
+	<div class="card">
+		<h2>Add or update a secret</h2>
+		<form
+			{...upsertSecret.enhance(async ({ submit }) => {
+				await submit();
+				newValue = '';
+			})}
+		>
+			<input type="hidden" name="projectId" value={projectId} />
+			<div class="row">
+				<label class="field grow">
+					<span>Name</span>
+					<input
+						name="name"
+						type="text"
+						value={newName}
+						oninput={(e) => (newName = e.currentTarget.value.toUpperCase())}
+						placeholder="SECRET_NAME"
+						autocomplete="off"
+						autocapitalize="characters"
+						spellcheck="false"
+						required
+					/>
+					<span class="hint">A–Z, 0–9, underscores.</span>
+				</label>
+				<label class="field grow">
+					<span>Value</span>
+					<input
+						name="value"
+						type="password"
+						bind:value={newValue}
+						placeholder="paste the secret value"
+						autocomplete="new-password"
+						spellcheck="false"
+						required
+					/>
+					<span class="hint">Saved opaque. Not displayed again after this submit.</span>
+				</label>
+				<button class="btn primary" type="submit">Save</button>
+			</div>
+		</form>
+	</div>
+{/if}
 
 <div class="card">
 	{#await secretsQuery}
@@ -96,7 +106,9 @@
 	{:then secrets}
 		<h2>Your secrets <span class="muted small">({secrets.length})</span></h2>
 		{#if secrets.length === 0}
-			<div class="muted small">No secrets yet. Add one above.</div>
+			<div class="muted small">
+				{#if canManage}No secrets yet. Add one above.{:else}No secrets yet.{/if}
+			</div>
 		{:else}
 			<ul class="rows">
 				{#each secrets as s (s.name)}
@@ -107,33 +119,39 @@
 							<code class="name">{s.name}</code>
 							<span class="muted small">updated {fmt(s.updatedAt)}</span>
 						</div>
-						<div class="row-actions">
-							<form
-								{...updateForm.enhance(async ({ submit }) => {
-									await submit();
-									editing[s.name] = '';
-								})}
-							>
-								<input type="hidden" name="projectId" value={projectId} />
-								<input type="hidden" name="name" value={s.name} />
-								<input
-									name="value"
-									type="password"
-									placeholder="new value (leave blank to cancel)"
-									autocomplete="new-password"
-									spellcheck="false"
-									bind:value={editing[s.name]}
-								/>
-								<button class="btn small" type="submit" disabled={!(editing[s.name] ?? '').length}>
-									Update
-								</button>
-							</form>
-							<form {...deleteForm}>
-								<input type="hidden" name="projectId" value={projectId} />
-								<input type="hidden" name="name" value={s.name} />
-								<button class="btn small danger" type="submit">Delete</button>
-							</form>
-						</div>
+						{#if canManage}
+							<div class="row-actions">
+								<form
+									{...updateForm.enhance(async ({ submit }) => {
+										await submit();
+										editing[s.name] = '';
+									})}
+								>
+									<input type="hidden" name="projectId" value={projectId} />
+									<input type="hidden" name="name" value={s.name} />
+									<input
+										name="value"
+										type="password"
+										placeholder="new value (leave blank to cancel)"
+										autocomplete="new-password"
+										spellcheck="false"
+										bind:value={editing[s.name]}
+									/>
+									<button
+										class="btn small"
+										type="submit"
+										disabled={!(editing[s.name] ?? '').length}
+									>
+										Update
+									</button>
+								</form>
+								<form {...deleteForm}>
+									<input type="hidden" name="projectId" value={projectId} />
+									<input type="hidden" name="name" value={s.name} />
+									<button class="btn small danger" type="submit">Delete</button>
+								</form>
+							</div>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -168,6 +186,15 @@
 		letter-spacing: 0.03em;
 		color: #374151;
 		margin: 0 0 10px;
+	}
+	.notice {
+		background: #f9fafb;
+		border: 1px solid #e5e7eb;
+		color: #374151;
+		border-radius: 6px;
+		padding: 8px 12px;
+		margin-bottom: 12px;
+		font-size: 13px;
 	}
 	.row {
 		display: flex;

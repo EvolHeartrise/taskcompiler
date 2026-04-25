@@ -1,5 +1,5 @@
 import { now, uuid } from '../index.ts';
-import { fetchAll, fetchOne, mapRow } from '../mappers.ts';
+import { fetchOne, mapRow } from '../mappers.ts';
 import type { Project, ProjectRole } from '../types.ts';
 
 interface ProjectRow {
@@ -55,17 +55,26 @@ export async function createProject(db: D1Database, input: CreateProjectInput): 
 	};
 }
 
-export async function listProjectsForUser(db: D1Database, userId: string): Promise<Project[]> {
-	return fetchAll<ProjectRow, Project>(
-		db
-			.prepare(
-				`SELECT p.* FROM projects p
-				 JOIN project_members m ON m.project_id = p.id
-				 WHERE m.user_id = ?
-				 ORDER BY p.created_at ASC`
-			)
-			.bind(userId)
-	);
+// Returns each project the user is a member of plus their role on it. Role
+// is folded in here (vs. a per-project lookup) because callers like the
+// `/projects` page need it to gate UI affordances per row.
+export async function listProjectsForUser(
+	db: D1Database,
+	userId: string
+): Promise<(Project & { role: ProjectRole })[]> {
+	const res = await db
+		.prepare(
+			`SELECT p.*, m.role AS role FROM projects p
+			 JOIN project_members m ON m.project_id = p.id
+			 WHERE m.user_id = ?
+			 ORDER BY p.created_at ASC`
+		)
+		.bind(userId)
+		.all<ProjectWithRoleRow>();
+	return res.results.map((row) => {
+		const project = mapRow<Project>(row, ['role']);
+		return { ...project, role: row.role };
+	});
 }
 
 // Returns the project and the caller's role on it, or null if the caller is

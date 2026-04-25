@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import { can } from '$lib/permissions';
 	import { createProject, getProjects, renameProject } from './data.remote';
 
 	let newName = $state('');
@@ -77,10 +78,12 @@
 				{#each data.projects as p (p.id)}
 					{@const isLastVisited = p.id === data.lastVisitedProjectId}
 					{@const renameForm = renameProject.for(p.id)}
+					{@const canRename = can(p.role, 'project.rename')}
 					<li class:active={isLastVisited}>
 						<div class="row-head">
 							<div class="name-block">
 								<a class="name" href={resolve('/p/[projectId]', { projectId: p.id })}>{p.name}</a>
+								<span class="chip role role-{p.role}">{p.role}</span>
 								{#if isLastVisited}<span class="chip">last visited</span>{/if}
 							</div>
 							<span class="muted small">
@@ -93,25 +96,27 @@
 							<a class="btn small" href={resolve('/p/[projectId]', { projectId: p.id })}>
 								Open project →
 							</a>
-							<form
-								{...renameForm.enhance(async ({ submit }) => {
-									await submit();
-									renaming[p.id] = '';
-								})}
-							>
-								<input type="hidden" name="projectId" value={p.id} />
-								<input
-									name="name"
-									type="text"
-									placeholder="new name"
-									autocomplete="off"
-									spellcheck="false"
-									bind:value={renaming[p.id]}
-								/>
-								<button class="btn small" type="submit" disabled={!(renaming[p.id] ?? '').length}>
-									Rename
-								</button>
-							</form>
+							{#if canRename}
+								<form
+									{...renameForm.enhance(async ({ submit }) => {
+										await submit();
+										renaming[p.id] = '';
+									})}
+								>
+									<input type="hidden" name="projectId" value={p.id} />
+									<input
+										name="name"
+										type="text"
+										placeholder="new name"
+										autocomplete="off"
+										spellcheck="false"
+										bind:value={renaming[p.id]}
+									/>
+									<button class="btn small" type="submit" disabled={!(renaming[p.id] ?? '').length}>
+										Rename
+									</button>
+								</form>
+							{/if}
 						</div>
 					</li>
 				{/each}
@@ -264,6 +269,22 @@
 		color: #3730a3;
 		font-size: 11px;
 		font-weight: 600;
+	}
+	.chip.role {
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	.chip.role.role-owner {
+		background: #ede9fe;
+		color: #5b21b6;
+	}
+	.chip.role.role-admin {
+		background: #eef2ff;
+		color: #3730a3;
+	}
+	.chip.role.role-editor {
+		background: #f3f4f6;
+		color: #374151;
 	}
 	.row-actions {
 		display: flex;
