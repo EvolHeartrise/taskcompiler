@@ -36,6 +36,7 @@ declare global {
 			CLOUDFLARE_API_TOKEN: string;
 			CLOUDFLARE_ACCOUNT_ID: string;
 			CLOUDFLARE_GATEWAY_NAME: string;
+			CLOUDFLARE_GATEWAY_TOKEN?: string;
 			GEN_WORKFLOW: Workflow<GenWorkflowParams>;
 			HEAL_WORKFLOW: Workflow<HealWorkflowParams>;
 			EMAIL: SendEmail;
