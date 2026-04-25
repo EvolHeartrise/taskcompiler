@@ -184,6 +184,7 @@ Runely reads secrets + vars from Worker bindings. Locally they come from `.dev.v
 | `CLOUDFLARE_API_TOKEN`         | yes         | WFP script uploads + AI Gateway calls + `scripts/logs.ts`                           |
 | `CLOUDFLARE_ACCOUNT_ID`        | yes         | Same                                                                                |
 | `CLOUDFLARE_GATEWAY_NAME`      | yes         | AI Gateway route name (agent calls Workers AI via this)                             |
+| `CLOUDFLARE_GATEWAY_TOKEN`     | no          | Bearer token for Authenticated Gateway. Set if the gateway requires auth headers    |
 | `APP_URL`                      | recommended | Override for Better Auth's baseURL + invite links (defaults to the prod Worker URL) |
 | `EMAIL_FROM`                   | no          | Verified sender for magic-link + invite emails. Unset = log-only dev fallback       |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | no          | Optional Google OAuth for Better Auth (magic link works without it)                 |

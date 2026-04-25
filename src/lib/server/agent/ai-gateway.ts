@@ -262,14 +262,19 @@ export async function createMessage(
 	const timeoutSignal = AbortSignal.timeout(AI_GATEWAY_REQUEST_TIMEOUT_MS);
 	const signal = opts?.signal ? AbortSignal.any([opts.signal, timeoutSignal]) : timeoutSignal;
 
+	const headers: Record<string, string> = {
+		Authorization: `Bearer ${cfToken}`,
+		'content-type': 'application/json'
+	};
+	if (env.CLOUDFLARE_GATEWAY_TOKEN) {
+		headers['cf-aig-authorization'] = `Bearer ${env.CLOUDFLARE_GATEWAY_TOKEN}`;
+	}
+
 	let res: Response;
 	try {
 		res = await fetch(url, {
 			method: 'POST',
-			headers: {
-				Authorization: `Bearer ${cfToken}`,
-				'content-type': 'application/json'
-			},
+			headers,
 			body: JSON.stringify(oaiBody),
 			signal
 		});
