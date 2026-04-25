@@ -3,6 +3,16 @@ main = "src/worker.ts"
 compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]
 
+routes = [
+	{ pattern = "taskcompiler.com", custom_domain = true },
+	{ pattern = "www.taskcompiler.com", custom_domain = true }
+]
+
+# Plain-text vars (non-secret). Override at runtime with `wrangler secret put`
+# of the same name — the secret takes precedence over the value here.
+[vars]
+EMAIL_FROM = "TaskCompiler <noreply@taskcompiler.com>"
+
 # The `typescript` compiler is bundled by the agent-code typecheck service
 # (src/lib/server/agent/typecheck/service.ts). Its CJS init code uses `__filename`
 # and `__dirname` as lexical identifiers to feature-detect its Node sys host,
@@ -36,12 +46,15 @@ name = "taskcompiler-heal"
 binding = "HEAL_WORKFLOW"
 class_name = "HealWorkflowFlow"
 
-# Cloudflare Email Sending. No-op until a verified sender domain exists
-# (EMAIL_FROM secret) and that domain's DNS is on Cloudflare. The binding
-# is safe to declare with no domain yet — send() throws, and auth.ts logs
-# the magic link to wrangler tail as a fallback.
+# Cloudflare Email Service binding (the newer transactional product, beta as
+# of 2026-04). `remote = true` opts in — without it the binding falls back to
+# legacy Email Routing, which can only reach verified destination addresses.
+# Requires the sender domain to be onboarded via dashboard → Email → Email
+# Sending → Onboard Domain (auto-adds MX/SPF/DKIM/DMARC on cf-bounce.<domain>).
+# Workers Paid plan is required to send to arbitrary recipients.
 [[send_email]]
 name = "EMAIL"
+remote = true
 
 [triggers]
 crons = ["* * * * *"]
