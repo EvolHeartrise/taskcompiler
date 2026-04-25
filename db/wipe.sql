@@ -1,13 +1,7 @@
--- One-shot "reset the prototype database" SQL. Drops every table Runely
--- touches — including Better Auth's and wrangler's old migration tracking —
--- so `db/schema.sql` can be applied afterwards against a clean slate.
---
---   bunx wrangler d1 execute taskcompiler-dev --remote --file db/wipe.sql
---   bunx wrangler d1 execute taskcompiler-dev --remote --file db/schema.sql
---
--- Safe to run repeatedly (all drops are IF EXISTS). Will sign out every
--- existing user (session table goes with it). Don't use against a database
--- that has real data.
+-- Drops every table Runely touches — including Better Auth's and wrangler's
+-- old migration tracking — so `db/schema.sql` can be applied against a clean
+-- slate. Safe to run repeatedly (all drops are IF EXISTS). Signs out every
+-- existing user. Don't use against a database that has real data.
 
 PRAGMA defer_foreign_keys = TRUE;
 
