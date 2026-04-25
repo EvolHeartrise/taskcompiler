@@ -4,7 +4,12 @@
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { PageProps } from './$types';
 	import type { HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
-	import { deleteWorkflow, getInFlight, resumeWorkflow, triggerWorkflow } from './data.remote';
+	import {
+		deleteWorkflow,
+		getInFlight,
+		resumeNeedsAttention,
+		triggerWorkflow
+	} from './data.remote';
 	import LocalTime, { utcLabel } from '$lib/LocalTime.svelte';
 
 	let { data }: PageProps = $props();
@@ -180,7 +185,7 @@
 	);
 
 	let triggerResult = $state<Awaited<ReturnType<typeof triggerWorkflow>> | null>(null);
-	const resumeResult = $derived(resumeWorkflow.result);
+	const resumeResult = $derived(resumeNeedsAttention.result);
 	const deleteResult = $derived(deleteWorkflow.result);
 
 	let deleteConfirmName = $state('');
@@ -292,7 +297,7 @@
 				? ''
 				: 's'}.
 		</p>
-		<form {...resumeWorkflow}>
+		<form {...resumeNeedsAttention}>
 			<input type="hidden" name="projectId" value={projectId} />
 			<input type="hidden" name="workflowId" value={workflowId} />
 			<button class="btn primary" type="submit">Resume and retry failed events</button>

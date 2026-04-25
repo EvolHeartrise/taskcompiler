@@ -3,17 +3,25 @@ import type { Workflow } from '@cloudflare/workers-types';
 import { command, form, getRequestEvent, query } from '$app/server';
 import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
-import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
+import { executeManualEvent, replayFailedEvents, WorkflowPausedError } from '$lib/server/engine';
 import {
 	getOpenNeedsAttentionSession,
 	listHealSessionsForWorkflow,
 	markHealSessionResolved
 } from '$lib/server/db/queries/heal-sessions';
 import { getProjectForUser } from '$lib/server/db/queries/projects';
-import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
+import {
+	getWorkflowForProject,
+	pauseWorkflow as pauseWorkflowRow,
+	resumeWorkflow as resumeWorkflowRow
+} from '$lib/server/db/queries/workflows';
 import type { ProjectRole } from '$lib/server/db/types';
+import { createLogger } from '$lib/server/log';
+import { EVENTS } from '$lib/server/log-events';
 import { errorMessage } from '$lib/server/util';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
+
+const log = createLogger('workflow-mutation');
 
 // Resolve the caller's role on the project (or 401/404 if they don't have
 // access). Used by every mutation in this file before `requireCan`. Reads
@@ -151,7 +159,10 @@ type ResumeResult =
 	| { ok: true; attempted: number; okCount: number; failedCount: number; sessionId: string }
 	| { ok: false; error: string };
 
-export const resumeWorkflow = form(
+// Resolves an open needs_attention session and replays its failed events.
+// Distinct from the pause/resume lifecycle (pauseWorkflow/resumeWorkflow
+// below) which flips the workflow row's `status` column.
+export const resumeNeedsAttention = form(
 	'unchecked',
 	async (data: { projectId: string; workflowId: string }): Promise<ResumeResult> => {
 		const event = getRequestEvent();
@@ -219,6 +230,12 @@ export const triggerWorkflow = command(
 		if (!workflow) {
 			error(404, 'Workflow not found');
 		}
+		if (workflow.status === 'paused') {
+			return {
+				ok: false,
+				error: 'Workflow is paused. Resume it before triggering manually.'
+			};
+		}
 
 		const raw = payload ?? '';
 		let parsed: unknown;
@@ -233,6 +250,14 @@ export const triggerWorkflow = command(
 				payload: parsed,
 				workflowId
 			});
+			if (result.runId === null) {
+				// Race: pause landed between authz and the executor's re-read.
+				// Surface the same user-facing message as the up-front check.
+				return {
+					ok: false,
+					error: 'Workflow is paused. Resume it before triggering manually.'
+				};
+			}
 			return {
 				ok: true,
 				eventId: result.eventId,
@@ -242,7 +267,101 @@ export const triggerWorkflow = command(
 				status: result.status
 			};
 		} catch (err) {
+			if (err instanceof WorkflowPausedError) {
+				return {
+					ok: false,
+					error: 'Workflow is paused. Resume it before triggering manually.'
+				};
+			}
 			return { ok: false, error: errorMessage(err) };
 		}
+	}
+);
+
+type PauseResult = { ok: true; alreadyPaused: boolean } | { ok: false; error: string };
+
+export const pauseWorkflow = command(
+	'unchecked',
+	async ({
+		projectId,
+		workflowId
+	}: {
+		projectId: string;
+		workflowId: string;
+	}): Promise<PauseResult> => {
+		const event = getRequestEvent();
+		const env = event.platform!.env;
+		const user = event.locals.user;
+		if (!user) {
+			error(401, 'unauthorized');
+		}
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'workflow.edit');
+
+		const db = getDb(env);
+		const workflow = await getWorkflowForProject(db, workflowId, projectId);
+		if (!workflow) {
+			error(404, 'Workflow not found');
+		}
+		if (workflow.status === 'paused') {
+			return { ok: true, alreadyPaused: true };
+		}
+		const changed = await pauseWorkflowRow(db, workflowId, projectId, user.id);
+		log.info(EVENTS.WORKFLOW_PAUSED, {
+			workflow_id: workflowId,
+			paused_by: user.id
+		});
+		await getInFlight({ projectId, workflowId }).refresh();
+		return { ok: true, alreadyPaused: !changed };
+	}
+);
+
+type ResumeWorkflowResult =
+	| { ok: true; alreadyActive: boolean; backfillRequested: boolean }
+	| { ok: false; error: string };
+
+export const resumeWorkflow = command(
+	'unchecked',
+	async ({
+		projectId,
+		workflowId,
+		backfill
+	}: {
+		projectId: string;
+		workflowId: string;
+		backfill?: boolean;
+	}): Promise<ResumeWorkflowResult> => {
+		const event = getRequestEvent();
+		const env = event.platform!.env;
+		const user = event.locals.user;
+		if (!user) {
+			error(401, 'unauthorized');
+		}
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'workflow.edit');
+
+		const backfillRequested = backfill === true;
+		const db = getDb(env);
+		const workflow = await getWorkflowForProject(db, workflowId, projectId);
+		if (!workflow) {
+			error(404, 'Workflow not found');
+		}
+		if (workflow.status === 'active') {
+			return { ok: true, alreadyActive: true, backfillRequested };
+		}
+		const changed = await resumeWorkflowRow(db, workflowId, projectId);
+		log.info(EVENTS.WORKFLOW_RESUMED, {
+			workflow_id: workflowId,
+			resumed_by: user.id,
+			backfill_requested: backfillRequested
+		});
+		if (backfillRequested) {
+			// TASK-14: wire startBackfill(env, workflowId) here. The backfill
+			// loop should enumerate events via the "events without a run"
+			// query documented in task 13's report, then invoke
+			// executeExistingEventForWorkflow for each.
+		}
+		await getInFlight({ projectId, workflowId }).refresh();
+		return { ok: true, alreadyActive: !changed, backfillRequested };
 	}
 );

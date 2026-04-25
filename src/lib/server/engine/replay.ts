@@ -32,7 +32,9 @@ async function dispatchAndTally<T>(
 		result.attempted += 1;
 		try {
 			const res = await dispatch(item);
-			result.runIds.push(res.runId);
+			if (res.runId !== null) {
+				result.runIds.push(res.runId);
+			}
 			if (res.status === 'ok') {
 				result.ok += 1;
 			} else if (res.status === 'failed') {

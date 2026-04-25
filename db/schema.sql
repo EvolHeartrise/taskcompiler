@@ -121,6 +121,9 @@ CREATE TABLE workflows (
   name TEXT NOT NULL,
   prompt TEXT NOT NULL,
   current_version_id TEXT REFERENCES workflow_versions(id),
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused')),
+  paused_at INTEGER,
+  paused_by TEXT REFERENCES user(id) ON DELETE SET NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );

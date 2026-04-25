@@ -38,6 +38,8 @@ export interface EventSource {
 	lastFiredAt: number;
 }
 
+export type WorkflowStatus = 'active' | 'paused';
+
 export interface Workflow {
 	id: string;
 	projectId: string;
@@ -45,6 +47,9 @@ export interface Workflow {
 	name: string;
 	prompt: string;
 	currentVersionId: string | null;
+	status: WorkflowStatus;
+	pausedAt: number | null;
+	pausedBy: string | null;
 	createdAt: number;
 	updatedAt: number;
 }

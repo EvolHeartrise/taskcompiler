@@ -1,7 +1,8 @@
 export {
 	executeExistingEventForWorkflow,
 	executeManualEvent,
-	executeSourceEvent
+	executeSourceEvent,
+	WorkflowPausedError
 } from './executor';
 export type {
 	ExecuteManualOptions,

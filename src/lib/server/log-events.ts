@@ -54,6 +54,14 @@ export const EVENTS = {
 	WORKFLOW_RUN_FAILED: 'workflow.run.failed',
 	WORKFLOW_STEP_WARNING: 'workflow.step.warning',
 
+	// Manual pause/resume lifecycle (task 13). EVENT_DEFERRED fires every
+	// time the executor skips a run because the workflow is paused; the row
+	// in `events` still exists so task 14's backfill can replay it.
+	WORKFLOW_PAUSED: 'workflow.paused',
+	WORKFLOW_RESUMED: 'workflow.resumed',
+	WORKFLOW_EVENT_DEFERRED: 'workflow.event_deferred',
+	WORKFLOW_HEAL_SKIPPED_PAUSED: 'workflow.heal_skipped_paused',
+
 	// Cron dispatcher.
 	CRON_TICK_END: 'cron.tick.end',
 	CRON_TICK_FAILED: 'cron.tick.failed',
