@@ -145,6 +145,13 @@ export interface ProjectSecretMeta {
 
 export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
 
+// Project roles. `owner` is unique per project (transferable, not deletable).
+// `admin` and `editor` are the granted-permission tiers — see
+// `src/lib/server/auth/permissions.ts` for the action matrix. Invites only
+// carry `admin`/`editor`; ownership is exclusively transferred, never invited.
+export type ProjectRole = 'owner' | 'admin' | 'editor';
+export type InviteRole = Exclude<ProjectRole, 'owner'>;
+
 export interface Invite {
 	id: string;
 	projectId: string;
@@ -152,6 +159,7 @@ export interface Invite {
 	token: string;
 	invitedBy: string;
 	status: InviteStatus;
+	role: InviteRole;
 	expiresAt: number;
 	createdAt: number;
 }
@@ -160,6 +168,6 @@ export interface ProjectMember {
 	userId: string;
 	name: string;
 	email: string;
-	role: 'owner' | 'member';
+	role: ProjectRole;
 	joinedAt: number;
 }

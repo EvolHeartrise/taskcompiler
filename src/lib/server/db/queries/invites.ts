@@ -1,6 +1,6 @@
 import { now, uuid } from '../index.ts';
 import { fetchAll, fetchOne } from '../mappers.ts';
-import type { Invite, InviteStatus, ProjectMember } from '../types.ts';
+import type { Invite, InviteRole, InviteStatus, ProjectMember, ProjectRole } from '../types.ts';
 
 interface InviteRow {
 	id: string;
@@ -9,6 +9,7 @@ interface InviteRow {
 	token: string;
 	invited_by: string;
 	status: InviteStatus;
+	role: InviteRole;
 	expires_at: number;
 	created_at: number;
 }
@@ -17,7 +18,7 @@ interface ProjectMemberJoinRow {
 	user_id: string;
 	name: string;
 	email: string;
-	role: 'owner' | 'member';
+	role: ProjectRole;
 	joined_at: number;
 }
 
@@ -27,6 +28,7 @@ export interface CreateInviteInput {
 	email: string;
 	invitedBy: string;
 	token: string;
+	role: InviteRole;
 	expiresAt: number;
 }
 
@@ -45,10 +47,19 @@ export async function createInvite(db: D1Database, input: CreateInviteInput): Pr
 	await db
 		.prepare(
 			`INSERT INTO project_invites
-			 (id, project_id, email, token, invited_by, status, expires_at, created_at)
-			 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
+			 (id, project_id, email, token, invited_by, status, role, expires_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
 		)
-		.bind(id, input.projectId, input.email, input.token, input.invitedBy, input.expiresAt, ts)
+		.bind(
+			id,
+			input.projectId,
+			input.email,
+			input.token,
+			input.invitedBy,
+			input.role,
+			input.expiresAt,
+			ts
+		)
 		.run();
 	return {
 		createdAt: ts,
@@ -57,6 +68,7 @@ export async function createInvite(db: D1Database, input: CreateInviteInput): Pr
 		id,
 		invitedBy: input.invitedBy,
 		projectId: input.projectId,
+		role: input.role,
 		status: 'pending',
 		token: input.token
 	};
@@ -131,15 +143,19 @@ export interface AcceptInviteInput {
 
 // Atomic accept: insert membership row + flip invite status in one D1 batch
 // so a partial application can't strand an "accepted" invite without a
-// member row (or vice versa).
-export async function acceptInvite(db: D1Database, input: AcceptInviteInput): Promise<void> {
+// member row (or vice versa). The membership row is created with the role
+// recorded on the invite at issue time.
+export async function acceptInvite(
+	db: D1Database,
+	input: AcceptInviteInput & { role: InviteRole }
+): Promise<void> {
 	await db.batch([
 		db
 			.prepare(
 				`INSERT OR IGNORE INTO project_members (project_id, user_id, role, created_at)
-				 VALUES (?, ?, 'member', ?)`
+				 VALUES (?, ?, ?, ?)`
 			)
-			.bind(input.projectId, input.userId, input.now),
+			.bind(input.projectId, input.userId, input.role, input.now),
 		db
 			.prepare(
 				`UPDATE project_invites SET status = 'accepted'

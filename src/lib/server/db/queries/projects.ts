@@ -1,6 +1,6 @@
 import { now, uuid } from '../index.ts';
-import { fetchAll, fetchOne } from '../mappers.ts';
-import type { Project } from '../types.ts';
+import { fetchAll, fetchOne, mapRow } from '../mappers.ts';
+import type { Project, ProjectRole } from '../types.ts';
 
 interface ProjectRow {
 	id: string;
@@ -8,6 +8,15 @@ interface ProjectRow {
 	name: string;
 	created_at: number;
 	updated_at: number;
+}
+
+interface ProjectWithRoleRow extends ProjectRow {
+	role: ProjectRole;
+}
+
+export interface ProjectWithRole {
+	project: Project;
+	role: ProjectRole;
 }
 
 export interface CreateProjectInput {
@@ -59,20 +68,27 @@ export async function listProjectsForUser(db: D1Database, userId: string): Promi
 	);
 }
 
+// Returns the project and the caller's role on it, or null if the caller is
+// not a member. Role is needed for permission gating at every project-scoped
+// entry point — see `src/lib/server/auth/permissions.ts`.
 export async function getProjectForUser(
 	db: D1Database,
 	id: string,
 	userId: string
-): Promise<Project | null> {
-	return fetchOne<ProjectRow, Project>(
-		db
-			.prepare(
-				`SELECT p.* FROM projects p
-				 JOIN project_members m ON m.project_id = p.id
-				 WHERE p.id = ? AND m.user_id = ?`
-			)
-			.bind(id, userId)
-	);
+): Promise<ProjectWithRole | null> {
+	const row = await db
+		.prepare(
+			`SELECT p.*, m.role AS role FROM projects p
+			 JOIN project_members m ON m.project_id = p.id
+			 WHERE p.id = ? AND m.user_id = ?`
+		)
+		.bind(id, userId)
+		.first<ProjectWithRoleRow>();
+	if (!row) {
+		return null;
+	}
+	const project = mapRow<Project>(row, ['role']);
+	return { project, role: row.role };
 }
 
 // System-level lookup — does not enforce membership. Prefer
@@ -89,7 +105,9 @@ export async function renameProject(
 ): Promise<Project | null> {
 	const ts = now();
 	// Gate the UPDATE on membership instead of `projects.user_id` so any
-	// member of the project can rename it.
+	// member of the project can rename it. The route handler should
+	// additionally enforce role-based permission via `requireCan` before
+	// calling this — the SQL guard is belt-and-braces.
 	const res = await db
 		.prepare(
 			`UPDATE projects SET name = ?, updated_at = ?
@@ -104,7 +122,8 @@ export async function renameProject(
 	if ((res.meta?.changes ?? 0) === 0) {
 		return null;
 	}
-	return getProjectForUser(db, id, userId);
+	const result = await getProjectForUser(db, id, userId);
+	return result?.project ?? null;
 }
 
 export async function ensureDefaultProject(db: D1Database, userId: string): Promise<Project[]> {

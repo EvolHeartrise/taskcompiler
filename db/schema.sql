@@ -77,7 +77,7 @@ CREATE INDEX idx_projects_user ON projects(user_id, created_at);
 CREATE TABLE project_members (
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES user(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK(role IN ('owner','member')),
+  role TEXT NOT NULL CHECK(role IN ('owner','admin','editor')),
   created_at INTEGER NOT NULL,
   PRIMARY KEY (project_id, user_id)
 );
@@ -90,6 +90,7 @@ CREATE TABLE project_invites (
   token TEXT NOT NULL UNIQUE,
   invited_by TEXT NOT NULL REFERENCES user(id),
   status TEXT NOT NULL CHECK(status IN ('pending','accepted','revoked','expired')),
+  role TEXT NOT NULL DEFAULT 'editor' CHECK(role IN ('admin','editor')),
   expires_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 );

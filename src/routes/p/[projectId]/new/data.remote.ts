@@ -1,13 +1,32 @@
 import { error, redirect } from '@sveltejs/kit';
 import { form, getRequestEvent, query } from '$app/server';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import {
 	getEventSourceForProject,
 	listEventSourcesForProject
 } from '$lib/server/db/queries/event-sources';
 import { countEventsForSource } from '$lib/server/db/queries/events';
+import { getProjectForUser } from '$lib/server/db/queries/projects';
 import { createWorkflow } from '$lib/server/db/queries/workflows';
+import type { ProjectRole } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
+
+async function requireProjectRole(projectId: string): Promise<ProjectRole> {
+	const event = getRequestEvent();
+	if (!event.locals.user) {
+		error(401, 'unauthorized');
+	}
+	const result = await getProjectForUser(
+		getDb(event.platform!.env),
+		projectId,
+		event.locals.user.id
+	);
+	if (!result) {
+		error(404, 'Project not found');
+	}
+	return result.role;
+}
 
 interface EventSourceWithCount {
 	id: string;
@@ -26,6 +45,8 @@ export const getEventSourcesWithCounts = query(
 		projectId: string;
 		preselectedSourceId: string | null;
 	}): Promise<{ eventSources: EventSourceWithCount[]; preselectedSourceId: string | null }> => {
+		// Read endpoint backing the "new workflow" form — gate by membership only.
+		await requireProjectRole(projectId);
 		const event = getRequestEvent();
 		const db = getDb(event.platform!.env);
 		const sources = await listEventSourcesForProject(db, projectId);
@@ -95,6 +116,9 @@ export const createWorkflowAndGenerate = form(
 		if (!sourceId) {
 			return { error: 'Event source is required.', values };
 		}
+
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'workflow.create');
 
 		const source = await getEventSourceForProject(db, sourceId, projectId);
 		if (!source) {

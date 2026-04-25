@@ -1,4 +1,6 @@
+import { error } from '@sveltejs/kit';
 import { form, getRequestEvent, query } from '$app/server';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import {
 	deleteSecret as deleteSecretRow,
@@ -6,11 +8,35 @@ import {
 	listSecretNamesForProject,
 	upsertSecret as upsertSecretRow
 } from '$lib/server/db/queries/secrets';
+import { getProjectForUser } from '$lib/server/db/queries/projects';
+import type { ProjectRole } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
 
 type Result = { ok: true; name: string } | { ok: false; error: string };
 
+// Resolve the caller's role, 401/404ing on missing access. Used as the
+// access gate for every entry in this file.
+async function requireProjectRole(projectId: string): Promise<ProjectRole> {
+	const event = getRequestEvent();
+	if (!event.locals.user) {
+		error(401, 'unauthorized');
+	}
+	const result = await getProjectForUser(
+		getDb(event.platform!.env),
+		projectId,
+		event.locals.user.id
+	);
+	if (!result) {
+		error(404, 'Project not found');
+	}
+	return result.role;
+}
+
+// Read-only list of secret *names* (not values) — surfaced to every project
+// member so they can reference $env in workflows. Values themselves are
+// write-only and are never returned by any read endpoint.
 export const getSecrets = query('unchecked', async (projectId: string) => {
+	await requireProjectRole(projectId);
 	const event = getRequestEvent();
 	return listSecretNamesForProject(getDb(event.platform!.env), projectId);
 });
@@ -29,6 +55,9 @@ export const upsertSecret = form(
 		if (!rawName) {
 			return { ok: false, error: 'Name is required.' };
 		}
+
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'secret.manage');
 
 		const name = rawName.toUpperCase();
 		if (!isValidSecretName(name)) {
@@ -66,6 +95,9 @@ export const deleteSecret = form(
 		if (!name) {
 			return { ok: false, error: 'Name is required.' };
 		}
+
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'secret.manage');
 
 		try {
 			await deleteSecretRow(getDb(event.platform!.env), projectId, name);

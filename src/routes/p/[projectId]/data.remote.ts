@@ -1,11 +1,11 @@
 import { error } from '@sveltejs/kit';
 import { command, getRequestEvent, query } from '$app/server';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import {
 	createInvite,
 	generateInviteToken,
 	getInviteForProject,
-	isProjectMember,
 	listProjectInvites,
 	listProjectMembers,
 	listPendingInvitesForEmail,
@@ -13,6 +13,7 @@ import {
 	revokeInvite
 } from '$lib/server/db/queries/invites';
 import { getProjectForUser } from '$lib/server/db/queries/projects';
+import type { InviteRole, InviteStatus, ProjectRole } from '$lib/server/db/types';
 import { sendInviteEmail } from '$lib/server/invites/send';
 import { createLogger } from '$lib/server/log';
 import { EVENTS } from '$lib/server/log-events';
@@ -27,14 +28,15 @@ interface MembershipMember {
 	userId: string;
 	name: string;
 	email: string;
-	role: 'owner' | 'member';
+	role: ProjectRole;
 	joinedAt: number;
 }
 
 interface MembershipInvite {
 	id: string;
 	email: string;
-	status: 'pending' | 'accepted' | 'revoked' | 'expired';
+	role: InviteRole;
+	status: InviteStatus;
 	expiresAt: number;
 	createdAt: number;
 	invitedBy: string;
@@ -45,17 +47,19 @@ export interface MembershipData {
 	invites: MembershipInvite[];
 }
 
-async function requireProjectMembership(projectId: string): Promise<{ env: Env; userId: string }> {
+async function requireProjectMembership(
+	projectId: string
+): Promise<{ env: Env; userId: string; role: ProjectRole }> {
 	const event = getRequestEvent();
 	if (!event.locals.user) {
 		error(401, 'unauthorized');
 	}
 	const env = event.platform!.env;
-	const project = await getProjectForUser(getDb(env), projectId, event.locals.user.id);
-	if (!project) {
+	const result = await getProjectForUser(getDb(env), projectId, event.locals.user.id);
+	if (!result) {
 		error(404, 'Project not found');
 	}
-	return { env, userId: event.locals.user.id };
+	return { env, role: result.role, userId: event.locals.user.id };
 }
 
 function normalizeEmail(raw: string): string {
@@ -82,6 +86,9 @@ function isPlausibleEmail(email: string): boolean {
 // Combined query: members + pending invites for the project. Folded together
 // because the UI (task 4) renders them in one panel and a single round-trip
 // keeps the layout from popping in two stages.
+//
+// Read endpoint — gated by project membership only. Role-specific gating
+// happens on the mutating commands below.
 export const getProjectMembership = query(
 	'unchecked',
 	async ({ projectId }: { projectId: string }): Promise<MembershipData> => {
@@ -100,6 +107,7 @@ export const getProjectMembership = query(
 					expiresAt: i.expiresAt,
 					id: i.id,
 					invitedBy: i.invitedBy,
+					role: i.role,
 					status: i.status
 				})),
 			members: members.map((m) => ({
@@ -119,12 +127,29 @@ export const createProjectInvite = command(
 	'unchecked',
 	async ({
 		projectId,
-		email
+		email,
+		role
 	}: {
 		projectId: string;
 		email: string;
+		role?: InviteRole;
 	}): Promise<CreateInviteResult> => {
-		const { env, userId } = await requireProjectMembership(projectId);
+		const { env, role: callerRole, userId } = await requireProjectMembership(projectId);
+		// Validate the requested invite role first — reject 'owner' explicitly
+		// because ownership is transferred, never invited.
+		const requestedRole: InviteRole = role ?? 'editor';
+		// `as string` so a malicious client passing 'owner' is caught here even
+		// though the static type forbids it.
+		if ((requestedRole as string) === 'owner') {
+			return { error: "Cannot invite as 'owner'. Transfer ownership instead.", ok: false };
+		}
+		if (requestedRole !== 'admin' && requestedRole !== 'editor') {
+			return { error: `Invalid role '${String(requestedRole)}'.`, ok: false };
+		}
+		// Caller must be allowed to invite at all, AND specifically allowed to
+		// invite at the requested role tier.
+		requireCan(callerRole, 'member.invite');
+		requireCan(callerRole, requestedRole === 'admin' ? 'invite.role.admin' : 'invite.role.editor');
 		const event = getRequestEvent();
 		const db = getDb(env);
 
@@ -155,6 +180,7 @@ export const createProjectInvite = command(
 				expiresAt,
 				invitedBy: userId,
 				projectId,
+				role: requestedRole,
 				token
 			});
 			inviteId = invite.id;
@@ -166,19 +192,20 @@ export const createProjectInvite = command(
 			invite_id: inviteId,
 			invited_by: userId,
 			project_id: projectId,
+			role: requestedRole,
 			to_email: normalized
 		});
 
 		const baseUrl = env.APP_URL ?? new URL(event.request.url).origin;
 		const acceptUrl = `${baseUrl.replace(/\/$/, '')}/invite/${token}`;
-		const project = await getProjectForUser(db, projectId, userId);
+		const projectResult = await getProjectForUser(db, projectId, userId);
 		await sendInviteEmail({
 			acceptUrl,
 			env,
 			inviteId,
 			inviterName: event.locals.user?.name ?? null,
 			projectId,
-			projectName: project?.name ?? 'a project',
+			projectName: projectResult?.project.name ?? 'a project',
 			to: normalized
 		});
 
@@ -198,7 +225,8 @@ export const revokeProjectInvite = command(
 		projectId: string;
 		inviteId: string;
 	}): Promise<RevokeResult> => {
-		const { env, userId } = await requireProjectMembership(projectId);
+		const { env, role, userId } = await requireProjectMembership(projectId);
+		requireCan(role, 'invite.revoke');
 		const db = getDb(env);
 		const invite = await getInviteForProject(db, inviteId, projectId);
 		if (!invite) {
@@ -223,8 +251,23 @@ type LeaveResult = { ok: true } | { ok: false; error: string };
 export const leaveProject = command(
 	'unchecked',
 	async ({ projectId }: { projectId: string }): Promise<LeaveResult> => {
-		const { env, userId } = await requireProjectMembership(projectId);
+		const { env, role, userId } = await requireProjectMembership(projectId);
 		const db = getDb(env);
+		// Sole-owner guard: an owner can self-leave only if they are the only
+		// member of the project, OR if there are other members AND ownership
+		// has already been transferred elsewhere. Owner-with-others must use
+		// transferOwnership (task 8) before leaving.
+		if (role === 'owner') {
+			const members = await listProjectMembers(db, projectId);
+			const otherMembers = members.filter((m) => m.userId !== userId);
+			const otherOwners = otherMembers.filter((m) => m.role === 'owner');
+			if (otherMembers.length > 0 && otherOwners.length === 0) {
+				return {
+					error: "You're the sole owner. Transfer ownership to another member before leaving.",
+					ok: false
+				};
+			}
+		}
 		// requireProjectMembership already established membership via
 		// getProjectForUser; redundant isProjectMember check would be a no-op.
 		await removeMember(db, projectId, userId);
@@ -248,14 +291,24 @@ export const removeProjectMember = command(
 		projectId: string;
 		userId: string;
 	}): Promise<RemoveMemberResult> => {
-		const { env, userId: actorId } = await requireProjectMembership(projectId);
+		const { env, role, userId: actorId } = await requireProjectMembership(projectId);
+		requireCan(role, 'member.remove');
 		if (!userId) {
 			return { error: 'userId is required.', ok: false };
 		}
 		const db = getDb(env);
-		const target = await isProjectMember(db, projectId, userId);
+		// Lookup target's role too, so we can refuse to remove the owner.
+		// `isProjectMember` is a 1/0 probe — read the row instead.
+		const members = await listProjectMembers(db, projectId);
+		const target = members.find((m) => m.userId === userId);
 		if (!target) {
 			return { error: 'That user is not a member of this project.', ok: false };
+		}
+		if (target.role === 'owner') {
+			return {
+				error: 'Cannot remove the owner. Transfer ownership first.',
+				ok: false
+			};
 		}
 		await removeMember(db, projectId, userId);
 		log.info(EVENTS.PROJECT_MEMBER_REMOVED, {

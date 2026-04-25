@@ -1,5 +1,6 @@
 import { error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
@@ -12,9 +13,15 @@ import {
 } from '$lib/server/db/queries/heal-sessions';
 import { highlightTs } from '$lib/server/highlight';
 
-// Layout enforces project ownership; the workflow lookup is still scoped by
-// project so /p/A/w/[id-of-B-workflow] 404s rather than leaking.
-export const load: PageServerLoad = async ({ params, url, platform }) => {
+// Layout enforces project membership and exposes the role on `parent.data`.
+// The workflow lookup is still scoped by project so /p/A/w/[id-of-B-workflow]
+// 404s rather than leaking.
+export const load: PageServerLoad = async ({ params, parent, url, platform }) => {
+	const { role } = await parent();
+	// Belt-and-braces — every role is allowed viewCode/viewHistory; the gate
+	// is uniform with mutating endpoints in this tree.
+	requireCan(role, 'workflow.viewCode');
+	requireCan(role, 'workflow.viewHistory');
 	const db = getDb(platform!.env);
 	const workflow = await getWorkflowForProject(db, params.workflowId, params.projectId);
 	if (!workflow) {

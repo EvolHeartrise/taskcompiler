@@ -1,7 +1,9 @@
-import { redirect } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
 import { form, getRequestEvent } from '$app/server';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import { createEventSource } from '$lib/server/db/queries/event-sources';
+import { getProjectForUser } from '$lib/server/db/queries/projects';
 import type { TriggerType } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
 
@@ -32,6 +34,20 @@ export const createEventSourceForProject = form(
 		if (!name) {
 			return { error: 'Name is required.', values };
 		}
+		// Resolve role + gate. 404 if the caller has no access; 403 if their
+		// role isn't allowed to manage event sources.
+		if (!event.locals.user) {
+			error(401, 'unauthorized');
+		}
+		const projectResult = await getProjectForUser(
+			getDb(event.platform!.env),
+			projectId,
+			event.locals.user.id
+		);
+		if (!projectResult) {
+			error(404, 'Project not found');
+		}
+		requireCan(projectResult.role, 'eventSource.manage');
 		if (triggerRaw !== 'webhook' && triggerRaw !== 'cron') {
 			return { error: 'Trigger must be webhook or cron.', values };
 		}

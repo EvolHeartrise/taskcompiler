@@ -15,10 +15,11 @@ export const load: LayoutServerLoad = async ({ locals, params, cookies, url, pla
 		error(401, 'unauthorized');
 	}
 	const db = getDb(platform!.env);
-	const project = await getProjectForUser(db, params.projectId, locals.user.id);
-	if (!project) {
+	const result = await getProjectForUser(db, params.projectId, locals.user.id);
+	if (!result) {
 		error(404, 'Project not found');
 	}
+	const { project, role } = result;
 
 	setProjectCookie(cookies, project.id, url.protocol === 'https:');
 
@@ -34,6 +35,10 @@ export const load: LayoutServerLoad = async ({ locals, params, cookies, url, pla
 			triggerType: s.triggerType
 		})),
 		project: { id: project.id, name: project.name },
+		// Role is exposed to children via `data.role` so UI (task 9) can render
+		// role-aware affordances. Server gating still happens per-action via
+		// `requireCan` — never trust the client copy.
+		role,
 		workflows: workflows.map((w) => ({
 			eventSourceId: w.eventSourceId,
 			id: w.id,

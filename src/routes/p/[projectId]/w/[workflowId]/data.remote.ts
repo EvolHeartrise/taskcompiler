@@ -1,6 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { Workflow } from '@cloudflare/workers-types';
 import { command, form, getRequestEvent, query } from '$app/server';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import { executeManualEvent, replayFailedEvents } from '$lib/server/engine';
 import {
@@ -8,9 +9,31 @@ import {
 	listHealSessionsForWorkflow,
 	markHealSessionResolved
 } from '$lib/server/db/queries/heal-sessions';
+import { getProjectForUser } from '$lib/server/db/queries/projects';
 import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
+import type { ProjectRole } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
 import { tearDownWorkflow } from '$lib/server/workflows-store';
+
+// Resolve the caller's role on the project (or 401/404 if they don't have
+// access). Used by every mutation in this file before `requireCan`. Reads
+// (`getInFlight`) intentionally skip the role lookup — they're only gated
+// by membership via `getWorkflowForProject` below.
+async function requireProjectRole(projectId: string): Promise<ProjectRole> {
+	const event = getRequestEvent();
+	if (!event.locals.user) {
+		error(401, 'unauthorized');
+	}
+	const result = await getProjectForUser(
+		getDb(event.platform!.env),
+		projectId,
+		event.locals.user.id
+	);
+	if (!result) {
+		error(404, 'Project not found');
+	}
+	return result.role;
+}
 
 export interface InFlightStatus {
 	status: string;
@@ -51,6 +74,10 @@ export const getInFlight = query(
 	}): Promise<InFlightInfo> => {
 		const event = getRequestEvent();
 		const env = event.platform!.env;
+		// Belt-and-braces role check — every role can viewHistory anyway, but
+		// keep the gate uniform with the rest of the file's mutations.
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'workflow.viewHistory');
 		const workflow = await getWorkflowForProject(getDb(env), workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
@@ -97,6 +124,9 @@ export const deleteWorkflow = form(
 		const workflowId = (data.workflowId ?? '').trim();
 		const confirmName = data.confirm_name ?? '';
 
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'workflow.delete');
+
 		const workflow = await getWorkflowForProject(getDb(env), workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
@@ -129,6 +159,11 @@ export const resumeWorkflow = form(
 		const db = getDb(env);
 		const projectId = (data.projectId ?? '').trim();
 		const workflowId = (data.workflowId ?? '').trim();
+
+		const role = await requireProjectRole(projectId);
+		// Resuming after needs_attention is a "run" action — same gate as
+		// re-running failed events.
+		requireCan(role, 'workflow.run');
 
 		const workflow = await getWorkflowForProject(db, workflowId, projectId);
 		if (!workflow) {
@@ -178,6 +213,8 @@ export const triggerWorkflow = command(
 	}): Promise<TriggerResult> => {
 		const event = getRequestEvent();
 		const env = event.platform!.env;
+		const role = await requireProjectRole(projectId);
+		requireCan(role, 'workflow.run');
 		const workflow = await getWorkflowForProject(getDb(env), workflowId, projectId);
 		if (!workflow) {
 			error(404, 'Workflow not found');
