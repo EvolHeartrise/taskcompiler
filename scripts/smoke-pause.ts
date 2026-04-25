@@ -121,7 +121,7 @@ function wranglerBin(): string {
 
 async function sql(commands: string): Promise<SqlResult[]> {
 	const env = { ...process.env };
-	delete env.CLOUDFLARE_API_TOKEN;
+	Reflect.deleteProperty(env, 'CLOUDFLARE_API_TOKEN');
 	return new Promise<SqlResult[]>((resolve, reject) => {
 		const p = spawn(
 			wranglerBin(),
