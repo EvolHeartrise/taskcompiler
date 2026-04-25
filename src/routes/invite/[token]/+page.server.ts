@@ -104,6 +104,7 @@ export const actions: Actions = {
 			inviteId: invite.id,
 			now: Date.now(),
 			projectId: invite.projectId,
+			role: invite.role,
 			userId: locals.user.id
 		});
 		log.info(EVENTS.INVITE_ACCEPTED, {

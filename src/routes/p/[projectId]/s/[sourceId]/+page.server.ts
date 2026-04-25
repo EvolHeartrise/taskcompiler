@@ -1,8 +1,10 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import { deleteEventSource, getEventSourceForProject } from '$lib/server/db/queries/event-sources';
 import { countEventsForSource, listEventsForSource } from '$lib/server/db/queries/events';
+import { getProjectForUser } from '$lib/server/db/queries/projects';
 import { listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
 import { listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import { createLogger } from '$lib/server/log';
@@ -55,9 +57,17 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 };
 
 export const actions: Actions = {
-	delete: async ({ params, request, platform }) => {
+	delete: async ({ locals, params, request, platform }) => {
 		const env = platform!.env;
 		const db = getDb(env);
+		if (!locals.user) {
+			error(401, 'unauthorized');
+		}
+		const projectResult = await getProjectForUser(db, params.projectId, locals.user.id);
+		if (!projectResult) {
+			error(404, 'Project not found');
+		}
+		requireCan(projectResult.role, 'eventSource.manage');
 		const source = await getEventSourceForProject(db, params.sourceId, params.projectId);
 		if (!source) {
 			error(404, 'Event source not found');

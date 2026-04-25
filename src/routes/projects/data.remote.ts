@@ -1,5 +1,6 @@
 import { error, redirect } from '@sveltejs/kit';
 import { form, getRequestEvent, query } from '$app/server';
+import { requireCan } from '$lib/server/auth/permissions';
 import { getDb } from '$lib/server/db';
 import {
 	createProject as createProjectRow,
@@ -97,10 +98,11 @@ export const renameProject = form(
 			return { ok: false, error: `Name must be ≤ ${NAME_MAX_LEN} characters.` };
 		}
 		const db = getDb(event.platform!.env);
-		const project = await getProjectForUser(db, projectId, event.locals.user.id);
-		if (!project) {
+		const result = await getProjectForUser(db, projectId, event.locals.user.id);
+		if (!result) {
 			return { ok: false, error: 'Project not found.' };
 		}
+		requireCan(result.role, 'project.rename');
 		const updated = await renameProjectRow(db, projectId, event.locals.user.id, name);
 		if (!updated) {
 			return { ok: false, error: 'Project not found.' };
