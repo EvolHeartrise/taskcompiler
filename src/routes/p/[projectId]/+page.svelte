@@ -97,6 +97,9 @@
 										>
 											{w.name}
 										</a>
+										{#if w.status === 'paused'}
+											<span class="badge paused">paused</span>
+										{/if}
 										<div class="wf-id">{w.id}</div>
 									</td>
 									<td class="num">{w.totalRuns}</td>
@@ -262,5 +265,11 @@
 	.badge.failed {
 		background: #fee2e2;
 		color: #991b1b;
+	}
+	.badge.paused {
+		background: #fef3c7;
+		color: #78350f;
+		border: 1px solid #fcd34d;
+		margin-left: 8px;
 	}
 </style>

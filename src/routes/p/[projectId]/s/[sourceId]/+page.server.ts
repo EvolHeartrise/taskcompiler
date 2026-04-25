@@ -40,6 +40,7 @@ export const load: PageServerLoad = async ({ params, url, platform }) => {
 				id: w.id,
 				name: w.name,
 				okRuns,
+				status: w.status,
 				totalRuns: runs.length
 			};
 		})

@@ -172,7 +172,9 @@
 								<div class="wf-id">{w.id}</div>
 							</td>
 							<td>
-								{#if w.currentVersionId}
+								{#if w.status === 'paused'}
+									<span class="badge paused">paused</span>
+								{:else if w.currentVersionId}
 									<span class="badge ok">live</span>
 								{:else}
 									<span class="badge running">generating</span>
@@ -584,6 +586,11 @@
 	.badge.failed {
 		background: #fee2e2;
 		color: #991b1b;
+	}
+	.badge.paused {
+		background: #fef3c7;
+		color: #78350f;
+		border: 1px solid #fcd34d;
 	}
 	.alert {
 		background: #fef2f2;
