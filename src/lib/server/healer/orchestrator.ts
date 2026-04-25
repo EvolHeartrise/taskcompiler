@@ -2,6 +2,7 @@ import { type DispatchTally, replayFailedEvents } from '$lib/server/engine/repla
 import { getDb } from '$lib/server/db';
 import { createVersion, getCurrentVersion } from '$lib/server/db/queries/versions';
 import { finishHealSession, getHealSession } from '$lib/server/db/queries/heal-sessions';
+import { getWorkflowStatus } from '$lib/server/db/queries/workflows';
 import { writeVersion } from '$lib/server/workflows-store';
 import { createLogger } from '$lib/server/log';
 import { EVENTS } from '$lib/server/log-events';
@@ -118,6 +119,37 @@ export async function deployHealedVersion(
 	const prevCurrent = await getCurrentVersion(db, workflowId);
 	if (!prevCurrent) {
 		throw new Error(`deployHealedVersion: workflow has no current version: ${workflowId}`);
+	}
+
+	// Pause could have landed during the agent + sweep steps above; if so,
+	// don't promote the candidate to current and don't replay failed events.
+	// The heal_session row is still finalized to `success` with the diff so
+	// operators can inspect the proposed fix, but the workflow stays frozen
+	// until the user explicitly resumes.
+	const statusNow = await getWorkflowStatus(db, workflowId);
+	if (statusNow === 'paused') {
+		const session = await getHealSessionAgentTranscript(env, healSessionId);
+		const diff = computeDiff(prevCurrent.sourceTs, sourceTs);
+		await finishHealSession(db, healSessionId, {
+			agentTranscript: session,
+			diff,
+			newVersionId: null,
+			status: 'abandoned',
+			testResults: sweep,
+			unhealableReason: 'workflow paused before deploy'
+		});
+		log.info(EVENTS.WORKFLOW_HEAL_SKIPPED_PAUSED, {
+			workflow_id: workflowId,
+			triggering_run_id: triggeringRunId,
+			heal_session_id: healSessionId,
+			stage: 'deploy'
+		});
+		return {
+			deployPath: prevCurrent.deployPath,
+			newVersionId: prevCurrent.id,
+			replay: null,
+			versionNumber: prevCurrent.version
+		};
 	}
 
 	const diff = computeDiff(prevCurrent.sourceTs, sourceTs);

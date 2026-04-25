@@ -8,7 +8,11 @@ import {
 } from '$lib/server/db/queries/heal-sessions';
 import { createRun, finishRunFailed, finishRunOk } from '$lib/server/db/queries/runs';
 import { getCurrentVersion } from '$lib/server/db/queries/versions';
-import { getWorkflow, listWorkflowsForEventSource } from '$lib/server/db/queries/workflows';
+import {
+	getWorkflow,
+	getWorkflowStatus,
+	listWorkflowsForEventSource
+} from '$lib/server/db/queries/workflows';
 import type { EventTriggerType, RunError, RunStatus } from '$lib/server/db/types';
 import { createLogger } from '$lib/server/log';
 import { withLogContext } from '$lib/server/log-context';
@@ -38,7 +42,7 @@ export interface WorkflowDispatchResult {
 	status: RunStatus;
 	result?: unknown;
 	error?: RunError;
-	skipped?: 'no_current_version';
+	skipped?: 'no_current_version' | 'paused';
 }
 
 export interface ExecuteSourceEventResult {
@@ -49,10 +53,11 @@ export interface ExecuteSourceEventResult {
 
 export interface ExecuteResult {
 	eventId: string;
-	runId: string;
+	runId: string | null;
 	status: RunStatus;
 	result?: unknown;
 	error?: RunError;
+	skipped?: 'paused';
 }
 
 export interface ExecuteExistingForWorkflowOptions {
@@ -213,6 +218,22 @@ export async function executeSourceEvent(
 	const dispatched: WorkflowDispatchResult[] = [];
 
 	for (const workflow of workflows) {
+		if (workflow.status === 'paused') {
+			// Event row is already persisted above; skipping the run insert
+			// keeps the "event without a run = needs backfill" invariant that
+			// resumeWorkflow's backfill relies on (task 14).
+			log.info(EVENTS.WORKFLOW_EVENT_DEFERRED, {
+				workflow_id: workflow.id,
+				event_id: event.id
+			});
+			dispatched.push({
+				runId: null,
+				skipped: 'paused',
+				status: 'running',
+				workflowId: workflow.id
+			});
+			continue;
+		}
 		if (!workflow.currentVersionId) {
 			dispatched.push({
 				runId: null,
@@ -224,6 +245,15 @@ export async function executeSourceEvent(
 		}
 		try {
 			const exec = await executeExistingEventForWorkflow(env, event.id, workflow.id);
+			if (exec.skipped === 'paused') {
+				dispatched.push({
+					runId: null,
+					skipped: 'paused',
+					status: 'running',
+					workflowId: workflow.id
+				});
+				continue;
+			}
 			dispatched.push({
 				error: exec.error,
 				result: exec.result,
@@ -253,6 +283,13 @@ export async function executeSourceEvent(
 	};
 }
 
+export class WorkflowPausedError extends Error {
+	constructor(workflowId: string) {
+		super(`Workflow is paused: ${workflowId}`);
+		this.name = 'WorkflowPausedError';
+	}
+}
+
 export async function executeManualEvent(
 	env: Env,
 	opts: ExecuteManualOptions
@@ -261,6 +298,9 @@ export async function executeManualEvent(
 	const workflow = await getWorkflow(db, opts.workflowId);
 	if (!workflow) {
 		throw new Error(`Workflow not found: ${opts.workflowId}`);
+	}
+	if (workflow.status === 'paused') {
+		throw new WorkflowPausedError(workflow.id);
 	}
 	if (!workflow.currentVersionId) {
 		throw new Error(`Workflow has no current version: ${opts.workflowId}`);
@@ -299,6 +339,24 @@ export async function executeExistingEventForWorkflow(
 	}
 
 	return withLock(workflow.id, async () => {
+		// Last-chance pause re-read inside the per-workflow lock, so a pause
+		// that lands between the initial load and this point still wins the
+		// race. The event row stays put; backfill (task 14) picks it up on
+		// resume via "events with no run".
+		const freshStatus = await getWorkflowStatus(db, workflow.id);
+		if (freshStatus === 'paused') {
+			log.info(EVENTS.WORKFLOW_EVENT_DEFERRED, {
+				workflow_id: workflow.id,
+				event_id: event.id
+			});
+			return {
+				eventId: event.id,
+				runId: null,
+				skipped: 'paused' as const,
+				status: 'running' as const
+			};
+		}
+
 		const run = await createRun(db, {
 			eventId: event.id,
 			isReplay: opts.isReplay ?? false,
@@ -370,6 +428,23 @@ export async function executeExistingEventForWorkflow(
 					log.info(EVENTS.HEAL_SKIPPED, {
 						reason: 'unresolved needs_attention session',
 						blocking_session_id: needsAttention.id
+					});
+					return {
+						error: runError,
+						eventId: event.id,
+						runId: run.id,
+						status: 'failed' as const
+					};
+				}
+				// A pause landed while this run was in-flight: don't open a new
+				// heal session. An already-running heal (claimed before the
+				// pause) is allowed to finish — the deploy step inside it also
+				// re-checks pause state before touching the current version.
+				const pausedNow = await getWorkflowStatus(db, workflow.id);
+				if (pausedNow === 'paused') {
+					log.info(EVENTS.WORKFLOW_HEAL_SKIPPED_PAUSED, {
+						workflow_id: workflow.id,
+						triggering_run_id: run.id
 					});
 					return {
 						error: runError,

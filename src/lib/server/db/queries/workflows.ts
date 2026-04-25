@@ -1,6 +1,6 @@
 import { now, uuid } from '../index.ts';
 import { fetchAll, fetchOne } from '../mappers.ts';
-import type { Workflow } from '../types.ts';
+import type { Workflow, WorkflowStatus } from '../types.ts';
 
 interface WorkflowRow {
 	id: string;
@@ -9,6 +9,9 @@ interface WorkflowRow {
 	name: string;
 	prompt: string;
 	current_version_id: string | null;
+	status: WorkflowStatus;
+	paused_at: number | null;
+	paused_by: string | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -29,8 +32,8 @@ export async function createWorkflow(
 	const ts = now();
 	await db
 		.prepare(
-			`INSERT INTO workflows (id, project_id, event_source_id, name, prompt, current_version_id, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`
+			`INSERT INTO workflows (id, project_id, event_source_id, name, prompt, current_version_id, status, paused_at, paused_by, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, NULL, 'active', NULL, NULL, ?, ?)`
 		)
 		.bind(id, input.projectId, input.eventSourceId, input.name, input.prompt, ts, ts)
 		.run();
@@ -40,8 +43,11 @@ export async function createWorkflow(
 		eventSourceId: input.eventSourceId,
 		id,
 		name: input.name,
+		pausedAt: null,
+		pausedBy: null,
 		projectId: input.projectId,
 		prompt: input.prompt,
+		status: 'active',
 		updatedAt: ts
 	};
 }
@@ -133,6 +139,54 @@ export async function updateWorkflow(
 		.bind(next.name, next.currentVersionId, next.updatedAt, id)
 		.run();
 	return next;
+}
+
+// Narrow read used on the hot path (executor / cron / healer guards) so a
+// pause that lands between event-persist and run-insert is seen immediately.
+export async function getWorkflowStatus(
+	db: D1Database,
+	id: string
+): Promise<WorkflowStatus | null> {
+	const row = await db
+		.prepare(`SELECT status FROM workflows WHERE id = ?`)
+		.bind(id)
+		.first<{ status: WorkflowStatus }>();
+	return row?.status ?? null;
+}
+
+export async function pauseWorkflow(
+	db: D1Database,
+	id: string,
+	projectId: string,
+	pausedBy: string
+): Promise<boolean> {
+	const ts = now();
+	const res = await db
+		.prepare(
+			`UPDATE workflows
+			 SET status = 'paused', paused_at = ?, paused_by = ?, updated_at = ?
+			 WHERE id = ? AND project_id = ? AND status = 'active'`
+		)
+		.bind(ts, pausedBy, ts, id, projectId)
+		.run();
+	return (res.meta?.changes ?? 0) > 0;
+}
+
+export async function resumeWorkflow(
+	db: D1Database,
+	id: string,
+	projectId: string
+): Promise<boolean> {
+	const ts = now();
+	const res = await db
+		.prepare(
+			`UPDATE workflows
+			 SET status = 'active', paused_at = NULL, paused_by = NULL, updated_at = ?
+			 WHERE id = ? AND project_id = ? AND status = 'paused'`
+		)
+		.bind(ts, id, projectId)
+		.run();
+	return (res.meta?.changes ?? 0) > 0;
 }
 
 export async function deleteWorkflow(db: D1Database, id: string): Promise<boolean> {
