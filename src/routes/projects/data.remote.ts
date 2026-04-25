@@ -10,6 +10,7 @@ import {
 } from '$lib/server/db/queries/projects';
 import { listWorkflowsForProject } from '$lib/server/db/queries/workflows';
 import { PROJECT_COOKIE } from '$lib/server/projects/cookie';
+import type { ProjectRole } from '$lib/server/db/types';
 import { errorMessage } from '$lib/server/util';
 
 const NAME_MAX_LEN = 60;
@@ -17,6 +18,7 @@ const NAME_MAX_LEN = 60;
 interface ProjectListItem {
 	id: string;
 	name: string;
+	role: ProjectRole;
 	createdAt: number;
 	workflowCount: number;
 }
@@ -43,6 +45,7 @@ export const getProjects = query(
 				createdAt: p.createdAt,
 				id: p.id,
 				name: p.name,
+				role: p.role,
 				workflowCount: counts[i] ?? 0
 			}))
 		};
