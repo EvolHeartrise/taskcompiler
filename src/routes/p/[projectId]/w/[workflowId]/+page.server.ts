@@ -5,13 +5,21 @@ import { getDb } from '$lib/server/db';
 import { getWorkflowForProject } from '$lib/server/db/queries/workflows';
 import { getEventSource } from '$lib/server/db/queries/event-sources';
 import { getCurrentVersion, getVersion, listVersions } from '$lib/server/db/queries/versions';
-import { listEventsForWorkflow } from '$lib/server/db/queries/events';
+import { countUnrunEventsForWorkflow, listEventsForWorkflow } from '$lib/server/db/queries/events';
 import { listFailedRunsForWorkflow, listRunsForWorkflow } from '$lib/server/db/queries/runs';
 import {
 	getOpenNeedsAttentionSession,
 	listHealSessionsForWorkflow
 } from '$lib/server/db/queries/heal-sessions';
 import { highlightTs } from '$lib/server/highlight';
+
+async function getUserName(db: D1Database, userId: string): Promise<string | null> {
+	const row = await db
+		.prepare(`SELECT name FROM user WHERE id = ?`)
+		.bind(userId)
+		.first<{ name: string }>();
+	return row?.name ?? null;
+}
 
 // Layout enforces project membership and exposes the role on `parent.data`.
 // The workflow lookup is still scoped by project so /p/A/w/[id-of-B-workflow]
@@ -36,7 +44,9 @@ export const load: PageServerLoad = async ({ params, parent, url, platform }) =>
 		allRuns,
 		failedRuns,
 		heals,
-		needsAttention
+		needsAttention,
+		unrunEventsCount,
+		pausedByName
 	] = await Promise.all([
 		getEventSource(db, workflow.eventSourceId),
 		getCurrentVersion(db, workflow.id),
@@ -45,7 +55,9 @@ export const load: PageServerLoad = async ({ params, parent, url, platform }) =>
 		listRunsForWorkflow(db, workflow.id),
 		listFailedRunsForWorkflow(db, workflow.id),
 		listHealSessionsForWorkflow(db, workflow.id),
-		getOpenNeedsAttentionSession(db, workflow.id)
+		getOpenNeedsAttentionSession(db, workflow.id),
+		countUnrunEventsForWorkflow(db, workflow.id),
+		workflow.pausedBy ? getUserName(db, workflow.pausedBy) : Promise.resolve(null)
 	]);
 	if (!eventSource) {
 		// Shouldn't happen — cascade would have wiped the workflow. Treat as 404.
@@ -72,6 +84,7 @@ export const load: PageServerLoad = async ({ params, parent, url, platform }) =>
 		heals,
 		needsAttention,
 		origin: url.origin,
+		pausedByName,
 		runs,
 		selectedVersion,
 		selectedVersionSourceHtml,
@@ -81,6 +94,7 @@ export const load: PageServerLoad = async ({ params, parent, url, platform }) =>
 			totalHeals: heals.length,
 			totalRuns
 		},
+		unrunEventsCount,
 		versions,
 		workflow
 	};

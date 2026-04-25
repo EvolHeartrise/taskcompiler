@@ -1,13 +1,17 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { PageProps } from './$types';
-	import type { HealSession, Run, WorkflowVersion } from '$lib/server/db/types';
+	import type { HealSession, ProjectRole, Run, WorkflowVersion } from '$lib/server/db/types';
+	import { can } from '$lib/permissions';
 	import {
 		deleteWorkflow,
 		getInFlight,
+		pauseWorkflow,
 		resumeNeedsAttention,
+		resumeWorkflow,
 		triggerWorkflow
 	} from './data.remote';
 	import LocalTime, { utcLabel } from '$lib/LocalTime.svelte';
@@ -15,6 +19,9 @@
 	let { data }: PageProps = $props();
 	let projectId = $derived(page.params.projectId!);
 	let workflowId = $derived(data.workflow.id);
+	let role = $derived<ProjectRole>((page.data as { role?: ProjectRole }).role ?? 'editor');
+	let canEdit = $derived(can(role, 'workflow.edit'));
+	let isPaused = $derived(data.workflow.status === 'paused');
 
 	let inFlightQuery = $derived(getInFlight({ projectId, workflowId }));
 	let inFlight = $derived(inFlightQuery.current ?? {});
@@ -192,6 +199,89 @@
 	let canDelete = $derived(deleteConfirmName === data.workflow.name);
 	let deleteDialog: HTMLDialogElement | undefined = $state();
 
+	let pausePending = $state(false);
+	let pauseError = $state<string | null>(null);
+
+	let resumeDialog: HTMLDialogElement | undefined = $state();
+	let resumeBackfill = $state(false);
+	let resumePending = $state(false);
+	let resumeError = $state<string | null>(null);
+	// Held across the post-resume navigation only — shown as a transient
+	// status line until the next in-page nav.
+	let backfillNotice = $state<{ count: number } | null>(null);
+
+	$effect(() => {
+		// Seed the checkbox to "checked" whenever the dialog is opened for a
+		// workflow with unprocessed events — re-read when paused state flips so
+		// a re-pause/re-resume cycle doesn't inherit stale user input.
+		if (isPaused && data.unrunEventsCount > 0) {
+			resumeBackfill = true;
+		} else {
+			resumeBackfill = false;
+		}
+	});
+
+	function openResumeDialog() {
+		resumeError = null;
+		resumeDialog?.showModal();
+	}
+
+	function closeResumeDialog() {
+		resumeDialog?.close();
+	}
+
+	async function runPause() {
+		if (pausePending) return;
+		const ok = confirm(
+			'Pause this workflow? New events will be persisted but not executed until you resume.'
+		);
+		if (!ok) return;
+		pauseError = null;
+		pausePending = true;
+		try {
+			const result = await pauseWorkflow({ projectId, workflowId });
+			if (!result.ok) {
+				pauseError = result.error;
+			} else {
+				await invalidateAll();
+			}
+		} catch (err) {
+			pauseError = err instanceof Error ? err.message : String(err);
+		} finally {
+			pausePending = false;
+		}
+	}
+
+	async function runResume() {
+		if (resumePending) return;
+		resumeError = null;
+		resumePending = true;
+		try {
+			const result = await resumeWorkflow({
+				backfill: resumeBackfill,
+				projectId,
+				workflowId
+			});
+			if (!result.ok) {
+				resumeError = result.error;
+				return;
+			}
+			if (
+				result.backfillRequested &&
+				result.backfillStartedEventCount !== undefined &&
+				result.backfillStartedEventCount > 0
+			) {
+				backfillNotice = { count: result.backfillStartedEventCount };
+			}
+			closeResumeDialog();
+			await invalidateAll();
+		} catch (err) {
+			resumeError = err instanceof Error ? err.message : String(err);
+		} finally {
+			resumePending = false;
+		}
+	}
+
 	function openDeleteDialog() {
 		deleteConfirmName = '';
 		deleteDialog?.showModal();
@@ -232,11 +322,16 @@
 </script>
 
 <div class="head">
-	<div>
+	<div class="head-main">
 		<div class="crumbs">
 			<a href={resolve('/p/[projectId]', { projectId })}>← Workflows</a>
 		</div>
-		<h1>{data.workflow.name}</h1>
+		<h1>
+			{data.workflow.name}
+			{#if isPaused}
+				<span class="chip paused-chip">Paused</span>
+			{/if}
+		</h1>
 		<div class="meta">
 			<span class="chip"
 				>{triggerLabel(data.eventSource.triggerType, data.eventSource.cronExpr)}</span
@@ -256,8 +351,40 @@
 				<span class="muted">· v{data.currentVersion.version}</span>
 			{/if}
 		</div>
+		{#if isPaused && data.workflow.pausedAt}
+			<div class="paused-meta">
+				Paused by {data.pausedByName ?? 'a removed user'}
+				<LocalTime ms={data.workflow.pausedAt} />
+			</div>
+		{/if}
 	</div>
+	{#if canEdit}
+		<div class="head-actions">
+			{#if isPaused}
+				<button type="button" class="btn primary" onclick={openResumeDialog}>Resume</button>
+			{:else}
+				<button type="button" class="btn" onclick={runPause} disabled={pausePending}>
+					{pausePending ? 'Pausing…' : 'Pause'}
+				</button>
+			{/if}
+		</div>
+	{/if}
 </div>
+{#if pauseError}
+	<div class="alert">{pauseError}</div>
+{/if}
+{#if backfillNotice}
+	<div class="banner banner-info">
+		<strong>Backfilling {backfillNotice.count} event{backfillNotice.count === 1 ? '' : 's'}…</strong
+		>
+		<a
+			href={resolve(
+				`/p/[projectId]/w/[workflowId]?${tabQuery('events')}` as `/p/[projectId]/w/[workflowId]?${string}`,
+				{ projectId, workflowId: data.workflow.id }
+			)}>View Events →</a
+		>
+	</div>
+{/if}
 
 <nav class="tabs">
 	{#each TABS as t (t.id)}
@@ -409,14 +536,19 @@
 				<form
 					onsubmit={(e) => {
 						e.preventDefault();
+						if (isPaused) return;
 						void runTrigger();
 					}}
 				>
 					<label class="field">
 						<span>Payload (JSON)</span>
-						<textarea name="payload" rows="5" bind:value={triggerPayload}></textarea>
+						<textarea name="payload" rows="5" bind:value={triggerPayload} disabled={isPaused}
+						></textarea>
 					</label>
-					<button class="btn primary" type="submit">Trigger</button>
+					<button class="btn primary" type="submit" disabled={isPaused}>Trigger</button>
+					{#if isPaused}
+						<div class="muted small paused-hint">Resume the workflow to trigger manually.</div>
+					{/if}
 				</form>
 				{#if triggerResult}
 					{#if triggerResult.ok}
@@ -829,6 +961,39 @@
 	{/if}
 </div>
 
+<dialog bind:this={resumeDialog} class="resume-dialog">
+	<form
+		onsubmit={(e) => {
+			e.preventDefault();
+			void runResume();
+		}}
+	>
+		<h2>Resume workflow?</h2>
+		<p>This workflow is paused. Resuming will re-enable webhook, cron, and manual triggers.</p>
+		<label class="field checkbox">
+			<input type="checkbox" bind:checked={resumeBackfill} disabled={data.unrunEventsCount === 0} />
+			<span>
+				Backfill <b>{data.unrunEventsCount}</b>
+				unprocessed event{data.unrunEventsCount === 1 ? '' : 's'} received while paused.
+			</span>
+		</label>
+		{#if data.unrunEventsCount === 0}
+			<div class="muted small hint">No unprocessed events to backfill.</div>
+		{/if}
+		{#if resumeError}
+			<div class="alert">{resumeError}</div>
+		{/if}
+		<div class="dialog-actions">
+			<button type="button" class="btn" onclick={closeResumeDialog} disabled={resumePending}
+				>Cancel</button
+			>
+			<button type="submit" class="btn primary" disabled={resumePending}>
+				{resumePending ? 'Resuming…' : 'Resume'}
+			</button>
+		</div>
+	</form>
+</dialog>
+
 <dialog bind:this={deleteDialog} class="delete-dialog" onclose={() => (deleteConfirmName = '')}>
 	<form {...deleteWorkflow}>
 		<input type="hidden" name="projectId" value={projectId} />
@@ -861,6 +1026,20 @@
 <style>
 	.head {
 		margin-bottom: 12px;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 16px;
+	}
+	.head-main {
+		flex: 1;
+		min-width: 0;
+	}
+	.head-actions {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+		flex-shrink: 0;
 	}
 	.crumbs {
 		font-size: 13px;
@@ -869,6 +1048,25 @@
 	h1 {
 		font-size: 22px;
 		margin: 0 0 4px;
+		display: inline-flex;
+		align-items: center;
+		gap: 10px;
+	}
+	.paused-chip {
+		background: #fef3c7;
+		color: #78350f;
+		border: 1px solid #fcd34d;
+		font-size: 12px;
+		padding: 2px 10px;
+		font-weight: 600;
+	}
+	.paused-meta {
+		margin-top: 6px;
+		font-size: 12.5px;
+		color: #78350f;
+	}
+	.paused-hint {
+		margin-top: 6px;
 	}
 	.meta {
 		display: flex;
@@ -986,7 +1184,8 @@
 		cursor: not-allowed;
 	}
 
-	.delete-dialog {
+	.delete-dialog,
+	.resume-dialog {
 		border: none;
 		border-radius: 10px;
 		padding: 0;
@@ -994,11 +1193,39 @@
 		width: calc(100% - 32px);
 		box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
 	}
-	.delete-dialog::backdrop {
+	.delete-dialog::backdrop,
+	.resume-dialog::backdrop {
 		background: rgba(15, 23, 42, 0.5);
 	}
-	.delete-dialog form {
+	.delete-dialog form,
+	.resume-dialog form {
 		padding: 22px 24px;
+	}
+	.resume-dialog h2 {
+		margin: 0 0 8px;
+		font-size: 18px;
+		color: #111;
+		text-transform: none;
+		letter-spacing: 0;
+	}
+	.resume-dialog p {
+		margin: 0 0 14px;
+		color: #374151;
+		font-size: 13.5px;
+	}
+	.resume-dialog .field.checkbox {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		margin-bottom: 6px;
+		font-size: 13.5px;
+		color: #111;
+	}
+	.resume-dialog .field.checkbox input {
+		margin-top: 3px;
+	}
+	.resume-dialog .hint {
+		margin: 0 0 12px 22px;
 	}
 	.delete-dialog h2 {
 		margin: 0 0 8px;
