@@ -4,7 +4,7 @@
 #   Local:  wrangler auto-creates a local D1 under `.wrangler/state/` on first `wrangler dev`.
 #   Apply migrations locally with `bunx wrangler d1 migrations apply runely-dev --local`.
 
-name = "runely"
+name = "taskcompiler"
 main = "src/worker.ts"
 compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]
