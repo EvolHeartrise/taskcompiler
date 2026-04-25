@@ -74,7 +74,9 @@ export const EVENTS = {
 	INVITE_ACCEPTED: 'invite.accepted',
 	INVITE_REVOKED: 'invite.revoked',
 	PROJECT_MEMBER_REMOVED: 'project.member_removed',
-	PROJECT_MEMBER_LEFT: 'project.member_left'
+	PROJECT_MEMBER_LEFT: 'project.member_left',
+	PROJECT_ROLE_CHANGED: 'project.role_changed',
+	PROJECT_OWNERSHIP_TRANSFERRED: 'project.ownership_transferred'
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];

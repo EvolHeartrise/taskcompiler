@@ -2,6 +2,11 @@ import { now, uuid } from '../index.ts';
 import { fetchAll, fetchOne } from '../mappers.ts';
 import type { Invite, InviteRole, InviteStatus, ProjectMember, ProjectRole } from '../types.ts';
 
+// Roles assignable via `updateMemberRole`. Owner is excluded — ownership moves
+// exclusively through `transferOwnership` (a 2-row atomic batch) so the
+// single-owner invariant survives even without a DB-level constraint.
+export type AssignableRole = Exclude<ProjectRole, 'owner'>;
+
 interface InviteRow {
 	id: string;
 	project_id: string;
@@ -203,4 +208,48 @@ export async function removeMember(
 		.prepare(`DELETE FROM project_members WHERE project_id = ? AND user_id = ?`)
 		.bind(projectId, userId)
 		.run();
+}
+
+// Caller must gate authz before calling. Refuses to overwrite an existing
+// `owner` row by clause — owner moves exclusively via `transferOwnership`.
+export async function updateMemberRole(
+	db: D1Database,
+	projectId: string,
+	userId: string,
+	newRole: AssignableRole
+): Promise<void> {
+	await db
+		.prepare(
+			`UPDATE project_members SET role = ?
+			 WHERE project_id = ? AND user_id = ? AND role != 'owner'`
+		)
+		.bind(newRole, projectId, userId)
+		.run();
+}
+
+// Atomic ownership swap. Owner uniqueness is not enforced at the DB level so
+// the two updates MUST land in a single `db.batch(...)` to keep "exactly one
+// owner per project" intact under concurrent calls. Old owner is demoted to
+// `admin` so they remain in the project with elevated powers and can later
+// leave or be removed normally.
+export async function transferOwnership(
+	db: D1Database,
+	projectId: string,
+	fromUserId: string,
+	toUserId: string
+): Promise<void> {
+	await db.batch([
+		db
+			.prepare(
+				`UPDATE project_members SET role = 'admin'
+				 WHERE project_id = ? AND user_id = ? AND role = 'owner'`
+			)
+			.bind(projectId, fromUserId),
+		db
+			.prepare(
+				`UPDATE project_members SET role = 'owner'
+				 WHERE project_id = ? AND user_id = ?`
+			)
+			.bind(projectId, toUserId)
+	]);
 }

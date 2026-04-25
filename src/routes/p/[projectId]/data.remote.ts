@@ -10,7 +10,9 @@ import {
 	listProjectMembers,
 	listPendingInvitesForEmail,
 	removeMember,
-	revokeInvite
+	revokeInvite,
+	transferOwnership,
+	updateMemberRole
 } from '$lib/server/db/queries/invites';
 import { getProjectForUser } from '$lib/server/db/queries/projects';
 import type { InviteRole, InviteStatus, ProjectRole } from '$lib/server/db/types';
@@ -315,6 +317,110 @@ export const removeProjectMember = command(
 			project_id: projectId,
 			removed_by: actorId,
 			user_id: userId
+		});
+		void getProjectMembership({ projectId }).refresh();
+		return { ok: true };
+	}
+);
+
+type ChangeRoleResult = { ok: true } | { ok: false; error: string };
+
+export const changeProjectMemberRole = command(
+	'unchecked',
+	async ({
+		projectId,
+		userId,
+		newRole
+	}: {
+		projectId: string;
+		userId: string;
+		newRole: ProjectRole;
+	}): Promise<ChangeRoleResult> => {
+		const { env, role: callerRole, userId: actorId } = await requireProjectMembership(projectId);
+		requireCan(callerRole, 'member.changeRole');
+		if (!userId) {
+			return { error: 'userId is required.', ok: false };
+		}
+		// Reject 'owner' before any DB work — ownership transfer requires the
+		// dedicated action to keep the single-owner invariant atomic.
+		if ((newRole as string) === 'owner') {
+			return {
+				error:
+					"Cannot set role to 'owner' here — ownership transfer requires the dedicated action.",
+				ok: false
+			};
+		}
+		if (newRole !== 'admin' && newRole !== 'editor') {
+			return { error: `Invalid role '${newRole as string}'.`, ok: false };
+		}
+		const db = getDb(env);
+		const members = await listProjectMembers(db, projectId);
+		const target = members.find((m) => m.userId === userId);
+		if (!target) {
+			return { error: 'That user is not a member of this project.', ok: false };
+		}
+		// Owners are immutable through this command — transfer instead.
+		if (target.role === 'owner') {
+			return {
+				error: "Cannot change the owner's role. Transfer ownership instead.",
+				ok: false
+			};
+		}
+		// Defensive: an owner reaching this branch would be filtered above, but
+		// the rule is "owner cannot change their own role here, ever".
+		if (userId === actorId && callerRole === 'owner') {
+			return {
+				error: 'Owners cannot change their own role. Transfer ownership first.',
+				ok: false
+			};
+		}
+		// No-op when the role isn't actually changing — skip the write and the log.
+		if (target.role === newRole) {
+			return { ok: true };
+		}
+		await updateMemberRole(db, projectId, userId, newRole);
+		log.info(EVENTS.PROJECT_ROLE_CHANGED, {
+			changed_by: actorId,
+			new_role: newRole,
+			old_role: target.role,
+			project_id: projectId,
+			target_user_id: userId
+		});
+		void getProjectMembership({ projectId }).refresh();
+		return { ok: true };
+	}
+);
+
+type TransferOwnershipResult = { ok: true } | { ok: false; error: string };
+
+export const transferProjectOwnership = command(
+	'unchecked',
+	async ({
+		projectId,
+		newOwnerUserId
+	}: {
+		projectId: string;
+		newOwnerUserId: string;
+	}): Promise<TransferOwnershipResult> => {
+		const { env, role: callerRole, userId: actorId } = await requireProjectMembership(projectId);
+		requireCan(callerRole, 'project.transferOwnership');
+		if (!newOwnerUserId) {
+			return { error: 'newOwnerUserId is required.', ok: false };
+		}
+		if (newOwnerUserId === actorId) {
+			return { error: 'You are already the owner of this project.', ok: false };
+		}
+		const db = getDb(env);
+		const members = await listProjectMembers(db, projectId);
+		const target = members.find((m) => m.userId === newOwnerUserId);
+		if (!target) {
+			return { error: 'That user is not a member of this project.', ok: false };
+		}
+		await transferOwnership(db, projectId, actorId, newOwnerUserId);
+		log.info(EVENTS.PROJECT_OWNERSHIP_TRANSFERRED, {
+			from_user_id: actorId,
+			project_id: projectId,
+			to_user_id: newOwnerUserId
 		});
 		void getProjectMembership({ projectId }).refresh();
 		return { ok: true };
