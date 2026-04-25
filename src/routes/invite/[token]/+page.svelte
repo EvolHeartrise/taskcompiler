@@ -9,7 +9,7 @@
 	const view = $derived(data.state);
 </script>
 
-<svelte:head><title>Project invite · Runely</title></svelte:head>
+<svelte:head><title>Project invite · TaskCompiler</title></svelte:head>
 
 <div class="wrap">
 	<div class="card">
@@ -21,16 +21,16 @@
 
 		{#if view.kind === 'invalid'}
 			<p class="muted">{view.reason}</p>
-			<a class="btn" href={resolve('/')}>Go to Runely</a>
+			<a class="btn" href={resolve('/')}>Go to TaskCompiler</a>
 		{:else if view.kind === 'expired'}
 			<p class="muted">This invite has expired. Ask whoever sent it to issue a new one.</p>
-			<a class="btn" href={resolve('/')}>Go to Runely</a>
+			<a class="btn" href={resolve('/')}>Go to TaskCompiler</a>
 		{:else if view.kind === 'revoked'}
 			<p class="muted">This invite was revoked and is no longer valid.</p>
-			<a class="btn" href={resolve('/')}>Go to Runely</a>
+			<a class="btn" href={resolve('/')}>Go to TaskCompiler</a>
 		{:else if view.kind === 'accepted'}
 			<p class="muted">This invite has already been accepted.</p>
-			<a class="btn" href={resolve('/')}>Go to Runely</a>
+			<a class="btn" href={resolve('/')}>Go to TaskCompiler</a>
 		{:else if view.kind === 'unauthenticated'}
 			<p>You're invited to <b>{view.projectName}</b>.</p>
 			<p class="muted small">

@@ -21,7 +21,7 @@
 	const deleteResult = $derived(deleteSecret.result);
 </script>
 
-<svelte:head><title>Secrets · Runely</title></svelte:head>
+<svelte:head><title>Secrets · TaskCompiler</title></svelte:head>
 
 <div class="page-head">
 	<div>

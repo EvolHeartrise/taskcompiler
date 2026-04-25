@@ -88,7 +88,7 @@ type EmittedPayload = EmittedFixPayload | EmittedUnhealablePayload;
 // and let `unhealableReason` carry the actual evidence.
 const CANNOT_FIX_CATEGORY: UnhealableCategory = 'other';
 
-export const HEAL_SYSTEM_PROMPT = `You are Runely's workflow healer. A user workflow just failed — your job is to diagnose the failure and either produce a corrected version or declare that no code change can fix it.
+export const HEAL_SYSTEM_PROMPT = `You are TaskCompiler's workflow healer. A user workflow just failed — your job is to diagnose the failure and either produce a corrected version or declare that no code change can fix it.
 
 ## Same contract as the gen role
 The workflow module is a single TypeScript file exporting \`export default async function run(event: unknown, ctx: Ctx)\`. The ctx surface is fixed:

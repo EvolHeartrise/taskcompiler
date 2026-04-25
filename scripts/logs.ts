@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 //
-// Runely Workers Observability CLI — queries the Workers Logs pipeline via
+// TaskCompiler Workers Observability CLI — queries the Workers Logs pipeline via
 // the Cloudflare REST API so agents and humans can inspect the deployed
 // worker without clicking through the dashboard.
 //
@@ -12,7 +12,7 @@
 //   1. Create a Cloudflare API token at
 //      https://dash.cloudflare.com/profile/api-tokens with scopes:
 //        - Account → Workers Observability → Read (on the account
-//          owning runely-workflows).
+//          owning taskcompiler-workflows).
 //   2. Export it: `export CLOUDFLARE_API_TOKEN=...`
 //   3. Export the account id: `export CLOUDFLARE_ACCOUNT_ID=...`
 //      (same value as in wrangler secrets). Alternatively, put both in a
@@ -283,7 +283,7 @@ function buildQueryBody(args: Args): Record<string, unknown> {
 	}
 
 	return {
-		queryId: 'runely-logs-cli',
+		queryId: 'taskcompiler-logs-cli',
 		parameters: {
 			datasets: ['cloudflare-workers'],
 			filters,

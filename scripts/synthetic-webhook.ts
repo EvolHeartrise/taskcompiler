@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Run with `--help` for usage; posts sample webhook payloads to a Runely
+// Run with `--help` for usage; posts sample webhook payloads to a TaskCompiler
 // webhook URL to exercise the ingest → execute pipeline end-to-end.
 
 interface SyntheticShape {

@@ -1,8 +1,8 @@
-# Runely
+# TaskCompiler
 
 Prompt → TypeScript workflow, self-healing ECA engine.
 
-Runely is a Pabbly/Zapier/n8n alternative where you describe a workflow in plain English, an agent emits a TypeScript module, and the engine runs it on webhook / cron triggers. Every event is persisted. When a workflow fails, a healing agent diagnoses the bug, tests a patch against all historical events, deploys a new version, and replays every failed event — so events are never dropped.
+TaskCompiler is a Pabbly/Zapier/n8n alternative where you describe a workflow in plain English, an agent emits a TypeScript module, and the engine runs it on webhook / cron triggers. Every event is persisted. When a workflow fails, a healing agent diagnoses the bug, tests a patch against all historical events, deploys a new version, and replays every failed event — so events are never dropped.
 
 ## Status: MVP
 
@@ -71,7 +71,7 @@ bun run deploy     # vite build + wrangler deploy
 
 Two senses of "workflow" coexist:
 
-1. _User workflows_ — generated TypeScript modules, each uploaded as a child Worker in the `runely-workflows` dispatch namespace, invoked via `env.DISPATCHER.get(deployPath).fetch(...)`.
+1. _User workflows_ — generated TypeScript modules, each uploaded as a child Worker in the `taskcompiler-workflows` dispatch namespace, invoked via `env.DISPATCHER.get(deployPath).fetch(...)`.
 2. _Cloudflare Workflows_ — the durable-execution product. `GEN_WORKFLOW` orchestrates generation (agent loop + WFP upload + optional backfill); `HEAL_WORKFLOW` orchestrates healing (agent loop + per-event test sweep + deploy + replay). Backfill itself is _not_ a Cloudflare Workflow — it's a detached loop kicked off under `ctx.waitUntil`.
 
 ## The workflow contract
@@ -176,7 +176,7 @@ Every workflow has `status IN ('active','paused')`. Pause is gated by `workflow.
 
 ## Environment
 
-Runely reads secrets + vars from Worker bindings. Locally they come from `.dev.vars` (gitignored); in prod via `wrangler secret put` or the dashboard. The canonical typed contract is `src/app.d.ts → Cloudflare.Env`.
+TaskCompiler reads secrets + vars from Worker bindings. Locally they come from `.dev.vars` (gitignored); in prod via `wrangler secret put` or the dashboard. The canonical typed contract is `src/app.d.ts → Cloudflare.Env`.
 
 | Var                            | Required    | Purpose                                                                             |
 | ------------------------------ | ----------- | ----------------------------------------------------------------------------------- |
@@ -213,7 +213,7 @@ The agent gets the `ctx` reference plus the project's current secret names, so p
 
 ## Known limitations / deliberately-deferred
 
-- Workflow code runs in its own WFP Worker — isolated from Runely, but _not_ sandboxed against the user's own Cloudflare account capabilities.
+- Workflow code runs in its own WFP Worker — isolated from TaskCompiler, but _not_ sandboxed against the user's own Cloudflare account capabilities.
 - No streaming of agent events to the UI — gen / heal show a final transcript only.
 - Cron fires once per minute (minimum granularity). Sub-minute schedules silently coarsen.
 - No rate limiting on webhook endpoints beyond Cloudflare's defaults.

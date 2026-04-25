@@ -37,5 +37,5 @@ vite.config.ts.timestamp-*
 # Playwright
 test-results
 
-# Runely data
+# TaskCompiler data
 data/

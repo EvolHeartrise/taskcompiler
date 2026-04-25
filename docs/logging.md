@@ -1,6 +1,6 @@
 # Logging
 
-Runely's worker emits structured JSON log lines via `src/lib/server/log.ts`
+TaskCompiler's worker emits structured JSON log lines via `src/lib/server/log.ts`
 into the Cloudflare Workers Observability pipeline (enabled in
 `wrangler.toml` → `[observability]`). User-script logs — ones the deployed
 workflow calls via `ctx.log()` — are forwarded into the same stream from
@@ -24,7 +24,7 @@ The current names: `run.started`, `run.completed`, `run.failed`,
 1. Create a Cloudflare API token at
    <https://dash.cloudflare.com/profile/api-tokens>.
 2. Grant scope: `Account → Workers Observability → Read` on the account
-   hosting `runely-workflows`.
+   hosting `taskcompiler-workflows`.
 3. Export locally: `export CLOUDFLARE_API_TOKEN=...` and
    `export CLOUDFLARE_ACCOUNT_ID=...`. (Alternatively put both in a repo-
    root `.dev.vars` file — the CLI reads it as a fallback.)

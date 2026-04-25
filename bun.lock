@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "runely",
+      "name": "taskcompiler",
       "dependencies": {
         "better-auth": "^1.6.7",
         "cron-parser": "^5.5.0",

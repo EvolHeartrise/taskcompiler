@@ -204,7 +204,7 @@ async function snapshotCounts(): Promise<CountSnapshot> {
 }
 
 async function main(): Promise<void> {
-	process.stdout.write(`\n== runely pause+backfill smoke (${RUN_TAG}) ==\n\n`);
+	process.stdout.write(`\n== taskcompiler pause+backfill smoke (${RUN_TAG}) ==\n\n`);
 
 	const before = await snapshotCounts();
 	process.stdout.write(
@@ -250,7 +250,7 @@ async function main(): Promise<void> {
 		// event_source.trigger_type and iterates workflows.event_source_id).
 		await sql(
 			[
-				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${OWNER_ID}', 'Smoke Pause Owner', 'smoke-pause+${RUN_TAG}@runely.test', 1, ${nowMs}, ${nowMs})`,
+				`INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('${OWNER_ID}', 'Smoke Pause Owner', 'smoke-pause+${RUN_TAG}@taskcompiler.test', 1, ${nowMs}, ${nowMs})`,
 				`INSERT INTO projects (id, user_id, name, created_at, updated_at) VALUES ('${PROJECT_ID}', '${OWNER_ID}', 'Smoke Pause Project ${RUN_TAG}', ${nowMs}, ${nowMs})`,
 				`INSERT INTO project_members (project_id, user_id, role, created_at) VALUES ('${PROJECT_ID}', '${OWNER_ID}', 'owner', ${nowMs})`,
 				`INSERT INTO event_sources (id, project_id, name, trigger_type, cron_expr, created_at, updated_at, last_fired_at) VALUES ('${SOURCE_ID}', '${PROJECT_ID}', 'Smoke Source', 'webhook', NULL, ${nowMs}, ${nowMs}, 0)`,

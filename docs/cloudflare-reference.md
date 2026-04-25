@@ -1,6 +1,6 @@
 # Cloudflare Migration Reference (April 2026)
 
-Working reference compiled during Phase 0 of the Runely → Cloudflare migration. Subsequent milestone briefs inline relevant sections.
+Working reference compiled during Phase 0 of the TaskCompiler → Cloudflare migration. Subsequent milestone briefs inline relevant sections.
 
 ## 1. SvelteKit + `@sveltejs/adapter-cloudflare`
 
@@ -29,7 +29,7 @@ export default {
 ### Minimal wrangler.toml (SvelteKit on Workers)
 
 ```toml
-name = "runely-app"
+name = "taskcompiler-app"
 main = ".svelte-kit/cloudflare/_worker.js"
 compatibility_date = "2026-04-17"
 compatibility_flags = ["nodejs_compat"]
@@ -293,7 +293,7 @@ await instance.terminate();
 
 ## 5. AI Gateway (Anthropic Integration)
 
-### Option Picks for Runely
+### Option Picks for TaskCompiler
 
 - **Use passthrough URL** for Anthropic (native Messages API, **tool use confirmed**).
 - **BYOK for M1** (Anthropic key as Worker secret); switch to unified billing in M4 if desired.
@@ -460,7 +460,7 @@ await stub.fetch(new Request('https://internal/save-state', { method: 'POST', bo
 ## UNCONFIRMED items to verify during implementation
 
 1. Cron Triggers on user Workers in a dispatch namespace (M4 blocker — have Workflows fallback ready).
-2. `env.AI` binding tool-use for Anthropic models (we use passthrough URL, so this is moot for Runely).
+2. `env.AI` binding tool-use for Anthropic models (we use passthrough URL, so this is moot for TaskCompiler).
 
 ## Sources
 

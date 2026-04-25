@@ -1,6 +1,6 @@
 import type { Cookies } from '@sveltejs/kit';
 
-export const PROJECT_COOKIE = 'runely_project';
+export const PROJECT_COOKIE = 'taskcompiler_project';
 
 export function setProjectCookie(cookies: Cookies, projectId: string, secure: boolean): void {
 	cookies.set(PROJECT_COOKIE, projectId, {

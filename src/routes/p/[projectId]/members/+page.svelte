@@ -218,7 +218,7 @@
 	}
 </script>
 
-<svelte:head><title>Members · Runely</title></svelte:head>
+<svelte:head><title>Members · TaskCompiler</title></svelte:head>
 
 <div class="page-head">
 	<div>

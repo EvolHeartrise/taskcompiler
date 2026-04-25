@@ -38,7 +38,7 @@ interface SqlResult {
 // exactly what we created without touching pre-existing rows.
 const RUN_TAG = `smoke-${Date.now().toString(36)}`;
 const TEST_USER_ID = `test-user-${RUN_TAG}`;
-const TEST_USER_EMAIL = `smoke+${RUN_TAG}@runely.test`;
+const TEST_USER_EMAIL = `smoke+${RUN_TAG}@taskcompiler.test`;
 const VALID_INVITE_ID = `test-invite-valid-${RUN_TAG}`;
 const VALID_INVITE_TOKEN = `tok_valid_${RUN_TAG}_${randomHex(16)}`;
 const REVOKED_INVITE_ID = `test-invite-revoked-${RUN_TAG}`;
@@ -146,7 +146,7 @@ async function snapshotCounts(): Promise<CountSnapshot> {
 }
 
 async function main(): Promise<void> {
-	process.stdout.write(`\n== runely invite-flow smoke (${RUN_TAG}) ==\n\n`);
+	process.stdout.write(`\n== taskcompiler invite-flow smoke (${RUN_TAG}) ==\n\n`);
 
 	// 0) Setup: pick a project to invite into.
 	const projects = await sql(
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
 		const revokeTestId = `test-revoke-${RUN_TAG}`;
 		const revokeTestToken = `tok_revoke_test_${RUN_TAG}_${randomHex(8)}`;
 		await sql(
-			`INSERT INTO project_invites (id, project_id, email, token, invited_by, status, expires_at, created_at) VALUES ('${revokeTestId}', '${projectId}', 'revoke-test+${RUN_TAG}@runely.test', '${revokeTestToken}', '${inviterId}', 'pending', ${expiresAt}, ${nowMs})`
+			`INSERT INTO project_invites (id, project_id, email, token, invited_by, status, expires_at, created_at) VALUES ('${revokeTestId}', '${projectId}', 'revoke-test+${RUN_TAG}@taskcompiler.test', '${revokeTestToken}', '${inviterId}', 'pending', ${expiresAt}, ${nowMs})`
 		);
 		await sql(
 			`UPDATE project_invites SET status = 'revoked' WHERE id = '${revokeTestId}' AND project_id = '${projectId}' AND status = 'pending'`

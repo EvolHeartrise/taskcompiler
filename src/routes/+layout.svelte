@@ -65,7 +65,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Runely</title>
+	<title>TaskCompiler</title>
 </svelte:head>
 
 {#if data.user}
@@ -74,7 +74,7 @@
 			<div class="sidebar-inner">
 				<a class="brand" href={resolve('/')}>
 					<img src={favicon} alt="" class="brand-icon" />
-					<span>Runely</span>
+					<span>TaskCompiler</span>
 				</a>
 
 				{#if data.projects.length > 0}
